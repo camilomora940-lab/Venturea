@@ -30,6 +30,25 @@ const followerRpc = { follower_counts: async ({ p_startup_id }, db) => {
   const roleOf = (id) => db.profiles.find((profile) => profile.id === id)?.role;
   return [{ total: rows.length, investors: rows.filter((r) => roleOf(r.follower_id) === "investor").length, companies: rows.filter((r) => roleOf(r.follower_id) === "company").length }];
 } };
+// Fila de my_entitlements como la entrega la vista de la base para cada estado de pago.
+const ENT_FEATURES = {
+  startup: ["follower_list", "profile_stats", "featured", "video_upload", "pro_badge"],
+  investor: ["unlimited_interests", "advanced_filters", "round_alerts", "followers_of_startup"],
+  company: ["unlimited_challenges", "unlimited_interests", "advanced_search", "export_lists", "pro_badge"]
+};
+const ent = (user_id, role, state, extra = {}) => {
+  const pro = ["active", "trialing", "past_due", "canceled"].includes(state);
+  return {
+    user_id, plan_id: `${role}_${state === "free" ? "free" : "pro"}`, plan_name: state === "free" ? "Free" : "Pro", role, status: state, is_pro: pro, effective_status: state,
+    trial_ends_at: state === "trialing" ? new Date(Date.now() + 4.5 * 86400000).toISOString() : null,
+    current_period_end: state === "active" || state === "canceled" ? "2030-12-10T12:00:00Z" : null,
+    grace_ends_at: state === "past_due" ? "2030-12-10T12:00:00Z" : null,
+    features: pro ? ENT_FEATURES[role] : [],
+    free_limits: role === "startup" ? { open_rounds: 1 } : role === "company" ? { interests_per_month: 10, open_challenges: 1 } : { interests_per_month: 10 },
+    interests_used_month: 3, open_challenges: 1, ...extra
+  };
+};
+const withEnt = (user, role, state, extra = {}, more = () => ({})) => () => ({ ...baseDb(), my_entitlements: [ent(user, role, state, extra)], ...more() });
 const roundRow = (id, startup_id, extra = {}) => ({ id, startup_id, status: "open", stage: "Seed", target_usd: 500000, ticket_min_usd: 25000, ticket_max_usd: 250000, committed_pct: 0, created_at: "2026-03-01T00:00:00Z", ...extra });
 const baseDb = () => ({
   profiles: [
@@ -102,6 +121,208 @@ const typeSearch = async (ctx, text) => {
 };
 
 window.SCENARIOS = {
+  phase4_limite_interes: {
+    db: withEnt("inv1", "investor", "free", { interests_used_month: 10 }),
+    options: { userId: "inv1" },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.until(() => ctx.$("#interest-meter").textContent === "10 de 10 este mes", "contador");
+      ctx.ok(ctx.$("#interest-meter").classList.contains("limit"), "el contador se marca al llegar al límite");
+      ctx.$("#like-button").click();
+      await ctx.wait(100);
+      ctx.ok(!ctx.db.interests.some((i) => i.id !== "i1" && i.investor_id === "inv1") && /límite de 10/.test(ctx.$("#toast").textContent), "al llegar a 10 no se envía y se explica el límite");
+      ctx.$('#main-nav [data-view="funds"]').click();
+      await ctx.wait(100);
+      ctx.$("[data-fund-interest]").click();
+      await ctx.wait(100);
+      ctx.ok(!ctx.db.interests.some((i) => i.id !== "i1" && i.investor_id === "inv1"), "el límite también vale desde Rondas abiertas");
+      ctx.$("#plan-cta").click();
+      ctx.ok(ctx.$("#view-plan").classList.contains("active"), "el botón de mejora abre Mi plan");
+    }
+  },
+  phase4_limite_en_la_base: {
+    db: withEnt("inv1", "investor", "free", { interests_used_month: 2 }),
+    options: { userId: "inv1", reject: { interests: "LIMIT_INTERESTS: el plan Free permite 10 \"Me interesa\" por mes" } },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.ok(ctx.$("#interest-meter").textContent === "2 de 10 este mes", "el contador desactualizado dice 2 de 10");
+      ctx.$("#like-button").click();
+      await ctx.wait(150);
+      ctx.ok(/límite de 10/.test(ctx.$("#toast").textContent), "si la base rechaza (LIMIT_INTERESTS), la pantalla lo explica en lugar de fallar");
+      ctx.ok(!ctx.log.some((e) => e.table === "interests" && e.op === "insert" && e.error), "sin errores sin explicar");
+    }
+  },
+  phase4_pro_sin_tope: {
+    db: withEnt("inv1", "investor", "active", { interests_used_month: 25 }),
+    options: { userId: "inv1" },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.ok(ctx.$("#interest-meter").textContent === "Ilimitados · Pro", "Pro: «Me interesa» ilimitados");
+      ctx.$("#like-button").click();
+      await ctx.until(() => ctx.db.interests.some((i) => i.id !== "i1" && i.investor_id === "inv1"), "interés enviado");
+      ctx.ok(true, "con Pro se envía aunque ya haya más de 10");
+      ctx.ok(!ctx.$("#pro-rail") || ctx.$("#pro-rail").hidden, "el aviso para mejorar a Pro desaparece");
+      const city = ctx.$("#adv-city");
+      ctx.ok(!city.disabled, "filtros avanzados habilitados");
+      city.value = "Valparaíso";
+      city.dispatchEvent(new ctx.win.Event("change", { bubbles: true }));
+      await ctx.until(() => ctx.visible(ctx.$("#no-compatible-startups")), "sin resultados");
+      ctx.ok(ctx.$("#investor-compatible-count").textContent.startsWith("0 "), "el filtro de ciudad se aplica a los resultados");
+      city.value = "";
+      city.dispatchEvent(new ctx.win.Event("change", { bubbles: true }));
+      await ctx.until(() => ctx.visible(ctx.$("#startup-card")), "otra vez resultados");
+      ctx.ok(true, "al limpiar el filtro vuelven las startups");
+    }
+  },
+  phase4_destacada_y_video: {
+    db: () => ({ ...baseDb(), pro_ids: ["own2", "own1"],
+      startup_profiles: baseDb().startup_profiles.map((s) => s.id === "s1" ? { ...s, pitch_video_file_url: "https://x.supabase.co/storage/v1/object/public/pitch-videos/own1/pitch.mp4" } : s.id === "s2" ? { ...s, pitch_video_file_url: "https://evil.example.com/v.mp4" } : s),
+      my_entitlements: [ent("inv1", "investor", "free")],
+      follows: [{ id: "f1", follower_id: "comp1", startup_id: "s1" }, { id: "f2", follower_id: "inv1", startup_id: "s2" }] }),
+    options: { userId: "inv1" },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.ok(/★ STARTUP DESTACADA · PRO/.test(ctx.$(".cover-label").textContent) && ctx.$("#company-tags .pro-tag"), "una startup Pro se muestra destacada con insignia");
+      const firstScore = ctx.$("#company-fit").textContent;
+      ctx.ok(/^\d+%/.test(firstScore), "el porcentaje mostrado no se altera por ser Pro");
+      ctx.$("#info-button").click();
+      await ctx.until(() => /Quién sigue/.test(ctx.$("#profile-page").textContent), "perfil");
+      ctx.ok(/🔒 Ver los nombres/.test(ctx.$("#profile-page").textContent) && !/Clara Corporativa/.test(ctx.$("#profile-page").textContent), "un inversionista Free no ve los nombres de los seguidores");
+      ctx.ok(ctx.$("#profile-page video") && ctx.$("#profile-page video").getAttribute("src").includes("/pitch-videos/own1/"), "el video propio de una startup Pro se reproduce");
+      ctx.ok(ctx.$("#profile-page .pro-tag"), "el perfil muestra la insignia Pro");
+      ctx.$('#main-nav [data-view="discover"]').click();
+      ctx.$("#pass-button").click();
+      ctx.$("#info-button").click();
+      await ctx.until(() => /Finova/.test(ctx.$("#profile-page").textContent), "perfil de Finova");
+      ctx.ok(!ctx.$("#profile-page video") && !/evil\.example/.test(ctx.$("#profile-page").innerHTML), "un video propio que no está en nuestro Storage nunca se muestra, ni siquiera de una startup Pro");
+    }
+  },
+  phase4_video_malicioso_y_vencido: {
+    db: () => ({ ...baseDb(), pro_ids: [],
+      startup_profiles: baseDb().startup_profiles.map((s) => s.id === "s1" ? { ...s, pitch_video_file_url: "https://x.supabase.co/storage/v1/object/public/pitch-videos/own1/pitch.mp4", pitch_video_url: null } : s.id === "s2" ? { ...s, pitch_video_file_url: "https://evil.example.com/v.mp4" } : s),
+      my_entitlements: [ent("inv1", "investor", "free")] }),
+    options: { userId: "inv1" },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.$("#info-button").click();
+      await ctx.until(() => /Nébula Health/.test(ctx.$("#profile-page").textContent), "perfil");
+      ctx.ok(!ctx.$("#profile-page video"), "si el plan Pro de la startup venció, su video propio queda bloqueado (se conserva pero no se muestra)");
+    }
+  },
+  phase4_inversionista_pro_seguidores: {
+    db: () => ({ ...baseDb(), my_entitlements: [ent("inv1", "investor", "active")],
+      follows: [{ id: "f1", follower_id: "comp1", startup_id: "s1" }] }),
+    options: { userId: "inv1" },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.$("#info-button").click();
+      await ctx.until(() => /Quién sigue/.test(ctx.$("#profile-page").textContent), "perfil");
+      ctx.ok(/Clara Corporativa · empresa/.test(ctx.$("#profile-page").textContent) && ctx.$("#profile-page .follower-company"), "el inversionista Pro ve quién más sigue a la startup");
+    }
+  },
+  phase4_startup_pro: {
+    db: () => ({ ...baseDb(), my_entitlements: [ent("own1", "startup", "active")], view_stats: { views_7d: 3, views_30d: 12, unique_viewers_30d: 5 },
+      follows: [{ id: "f1", follower_id: "comp1", startup_id: "s1" }, { id: "f2", follower_id: "inv1", startup_id: "s1" }] }),
+    options: { userId: "own1" },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.until(() => ctx.$("#views-30d").textContent === "12", "visitas");
+      ctx.ok(ctx.$("#views-note").textContent === "3 en los últimos 7 días", "estadísticas de visitas para la startup Pro");
+      ctx.ok(ctx.$("#view-startup .tag-row .pro-tag"), "la insignia Pro aparece en su panel");
+      ctx.$("#view-own-profile").click();
+      await ctx.until(() => /Quién sigue/.test(ctx.$("#profile-page").textContent) && /Ana Inversora/.test(ctx.$("#profile-page").textContent), "lista de seguidores");
+      ctx.ok(/Ana Inversora · inversionista/.test(ctx.$("#profile-page").textContent) && /Clara Corporativa · empresa/.test(ctx.$("#profile-page").textContent), "la startup Pro ve quién la sigue, con su tipo");
+      ctx.$('#main-nav [data-view="startup"]').click();
+      ctx.$("#edit-startup").click();
+      ctx.ok(!ctx.$("#pitch-file").disabled, "la startup Pro puede subir un video propio");
+      const form = ctx.$("#startup-profile-form");
+      const transfer = new ctx.win.DataTransfer();
+      transfer.items.add(new ctx.win.File([new Uint8Array(2048)], "pitch.mp4", { type: "video/mp4" }));
+      ctx.$("#pitch-file").files = transfer.files;
+      form.requestSubmit();
+      await ctx.until(() => ctx.log.some((e) => e.upload === "pitch-videos"), "subida de video");
+      await ctx.wait(150);
+      const upload = ctx.log.find((e) => e.upload === "pitch-videos");
+      ctx.ok(upload.path.startsWith("own1/") && upload.type === "video/mp4", `el video va a pitch-videos en la carpeta del usuario (${upload.path})`);
+      ctx.ok(/pitch-videos\/own1\//.test(ctx.db.startup_profiles.find((s) => s.id === "s1").pitch_video_file_url), "se guarda la URL del video");
+    }
+  },
+  phase4_startup_free_bloqueos: {
+    db: withEnt("own1", "startup", "free", {}, () => ({ follows: [{ id: "f1", follower_id: "comp1", startup_id: "s1" }] })),
+    options: { userId: "own1" },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.wait(150);
+      ctx.ok(ctx.$("#views-30d").textContent === "🔒" && ctx.$("#views-note").textContent === "Función Pro", "las visitas están bloqueadas en Free");
+      ctx.ok(!ctx.log.some((e) => e.rpc === "startup_view_stats"), "ni siquiera se consulta lo bloqueado");
+      ctx.$("#view-own-profile").click();
+      await ctx.until(() => /Quién sigue/.test(ctx.$("#profile-page").textContent), "perfil propio");
+      ctx.ok(/🔒 Ver los nombres/.test(ctx.$("#profile-page").textContent) && !/Clara Corporativa/.test(ctx.$("#profile-page").textContent), "la lista de seguidores está bloqueada en Free");
+      ctx.$("#profile-page [data-edit-own]").click();
+      ctx.ok(ctx.$("#pitch-file").disabled && /Disponible en el plan Pro/.test(ctx.$("#pitch-file-hint").textContent), "subir video propio está bloqueado en Free");
+      ctx.ok(!ctx.$("#plan-cta").hidden && ctx.$("#plan-cta").textContent === "Mejorar a Pro", "Free ve el botón Mejorar a Pro");
+    }
+  },
+  phase4_empresa_limites_y_exportar: {
+    db: () => ({ ...baseDb(), my_entitlements: [ent("comp1", "company", "free")],
+      startup_profiles: baseDb().startup_profiles.map((s) => s.id === "s2" ? { ...s, name: "=SUMA(1+1)" } : s),
+      follows: [{ id: "f1", follower_id: "comp1", startup_id: "s2" }] }),
+    options: { userId: "comp1", reject: { company_challenges: "LIMIT_CHALLENGES: el plan Free permite 1 desafío(s) abierto(s)" } },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.$('#main-nav [data-view="challenges"]').click();
+      await ctx.until(() => /Plan Free: 1 de 1 desafío abierto/.test(ctx.$("#challenge-note").textContent), "nota de límite");
+      ctx.ok(true, "la pantalla de desafíos muestra el límite del plan Free");
+      const form = ctx.$("#challenge-form");
+      form.elements.title.value = "Segundo desafío";
+      form.elements.description.value = "Un segundo desafío que debería rechazar la base.";
+      form.requestSubmit();
+      await ctx.wait(150);
+      ctx.ok(/permite un desafío abierto/.test(ctx.$("#toast").textContent), "el rechazo de la base (LIMIT_CHALLENGES) se explica");
+      ctx.$('#main-nav [data-view="following"]').click();
+      await ctx.wait(100);
+      ctx.$("#export-lists").click();
+      await ctx.wait(100);
+      ctx.ok(ctx.$("#view-plan").classList.contains("active"), "exportar listas está bloqueado en Free y lleva al plan");
+    }
+  },
+  phase4_empresa_pro_exporta: {
+    db: () => ({ ...baseDb(), my_entitlements: [ent("comp1", "company", "active")],
+      startup_profiles: baseDb().startup_profiles.map((s) => s.id === "s2" ? { ...s, name: "=SUMA(1+1)" } : s),
+      follows: [{ id: "f1", follower_id: "comp1", startup_id: "s2" }], interests: [{ id: "i9", investor_id: "comp1", startup_id: "s1", status: "matched", created_at: "2026-04-01T00:00:00Z" }] }),
+    options: { userId: "comp1" },
+    async run(ctx) {
+      await appReady(ctx);
+      let captured;
+      ctx.win.URL.createObjectURL = (blob) => { captured = blob; return "blob:test"; };
+      ctx.win.HTMLAnchorElement.prototype.click = function () { ctx.log.push({ download: this.download }); };
+      ctx.$('#main-nav [data-view="following"]').click();
+      await ctx.wait(150);
+      ctx.$("#export-lists").click();
+      await ctx.until(() => captured, "archivo");
+      const text = await captured.text();
+      ctx.ok(ctx.log.some((e) => e.download === "venturea-mis-listas.csv"), "descarga venturea-mis-listas.csv");
+      ctx.ok(text.includes("Lista,Startup,Sector,Ciudad,Estado") && text.includes("Interés,Nébula Health,Healthtech,Santiago,Match"), "el CSV trae los intereses con su estado");
+      ctx.ok(text.includes("Seguida,'=SUMA(1+1),Fintech,Santiago,Siguiendo"), "una fórmula en un nombre se neutraliza (apóstrofo)");
+    }
+  },
+  phase4_aviso_de_cobro: {
+    db: () => ({ ...baseDb(), my_entitlements: [ent("own1", "startup", "past_due")],
+      notifications: [{ id: "nb1", user_id: "own1", type: "billing", actor_id: null, entity_id: null, read_at: null, created_at: "2026-04-01T10:00:00Z" }] }),
+    options: { userId: "own1" },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.until(() => ctx.visible(ctx.$("#notif-badge")), "campana");
+      ctx.$("#notification-button").click();
+      await ctx.until(() => /Tu pago está pendiente/.test(ctx.$("#notification-panel").textContent), "aviso de cobro");
+      ctx.$("#notification-panel .notice-row").click();
+      await ctx.wait(150);
+      ctx.ok(ctx.$("#view-plan").classList.contains("active"), "el aviso de cobro lleva a Mi plan");
+      ctx.ok(ctx.$("#plan-card").classList.contains("alert") && /Pago pendiente · actualiza tu medio de pago/.test(ctx.$("#plan-title").textContent), "la tarjeta del plan se pone en alerta");
+      ctx.$("[data-checkout]").click();
+      ctx.ok(/pagos aún no están habilitados/.test(ctx.$("#toast").textContent), "sin pasarela, el botón de pago lo explica en vez de simular un cobro");
+    }
+  },
   phase3_publicaciones: {
     db: () => ({ ...baseDb(), posts: manyPosts(), follows: [{ id: "f9", follower_id: "inv1", startup_id: "s2" }] }),
     options: { userId: "inv1" },
@@ -465,6 +686,7 @@ window.SCENARIOS = {
       ctx.ok(true, "panel de financiamiento"); await ctx.wait(500);
     }
   },
+  shot_plan: { db: withEnt("inv1", "investor", "past_due", { interests_used_month: 7 }), options: { userId: "inv1" }, async run(ctx) { await appReady(ctx); ctx.$("#profile-button").click(); ctx.$('[data-menu-action="plan"]').click(); await ctx.until(() => ctx.$$("#plan-compare li").length > 0, "plan"); ctx.ok(true, "plan"); await ctx.wait(500); } },
   shot_empresa: { db: baseDb, options: { userId: "comp1" }, async run(ctx) { await appReady(ctx); ctx.ok(true, "interfaz abierta"); await ctx.wait(400); } },
   shot_startup: { db: baseDb, options: { userId: "own1" }, async run(ctx) { await appReady(ctx); ctx.ok(true, "interfaz abierta"); await ctx.wait(400); } },
   phase1_sectores_inversor: {
@@ -586,3 +808,36 @@ window.SCENARIOS = {
     }
   }
 };
+
+// Un escenario por estado de pago: lo que muestra la tarjeta del plan y lo que se habilita o bloquea.
+const PLAN_STATES = {
+  free: { tag: "PLAN FREE", title: /Estás en el plan Free/, cta: "Mejorar a Pro", pro: false },
+  trialing: { tag: "PRUEBA PRO", title: /Prueba Pro · quedan 5 días/, cta: "Elegir plan Pro", pro: true },
+  active: { tag: "PLAN PRO", title: /Pro · se renueva el 10 dic/, cta: null, pro: true },
+  past_due: { tag: "PAGO PENDIENTE", title: /Pago pendiente · actualiza tu medio de pago/, cta: "Actualizar pago", pro: true, alert: true },
+  canceled: { tag: "PRO HASTA", title: /Pro hasta el 10 dic · no se renovará/, cta: "Reactivar Pro", pro: true },
+  expired: { tag: "PLAN FREE", title: /Tu plan Pro venció/, cta: "Volver a Pro", pro: false }
+};
+for (const [state, want] of Object.entries(PLAN_STATES)) {
+  window.SCENARIOS[`phase4_estado_${state}`] = {
+    db: withEnt("inv1", "investor", state),
+    options: { userId: "inv1" },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.until(() => ctx.$("#plan-tag").textContent === want.tag, `tarjeta del plan ${state}`);
+      ctx.ok(want.title.test(ctx.$("#plan-title").textContent), `${state}: «${ctx.$("#plan-title").textContent}»`);
+      ctx.ok(want.cta ? !ctx.$("#plan-cta").hidden && ctx.$("#plan-cta").textContent === want.cta : ctx.$("#plan-cta").hidden, `${state}: botón ${want.cta || "(ninguno)"}`);
+      ctx.ok(ctx.$("#plan-card").classList.contains("alert") === Boolean(want.alert), `${state}: ${want.alert ? "aviso en rojo" : "sin alerta"}`);
+      ctx.ok(ctx.$("#stat-plan").textContent === (want.pro ? "Pro" : "Free"), `${state}: la tarjeta de estadísticas dice ${want.pro ? "Pro" : "Free"}`);
+      ctx.ok(ctx.$("#adv-city").disabled === !want.pro, `${state}: filtros avanzados ${want.pro ? "habilitados" : "bloqueados"}`);
+      ctx.ok(ctx.$("#interest-meter").textContent === (want.pro ? "Ilimitados · Pro" : "3 de 10 este mes"), `${state}: contador de «Me interesa»`);
+      ctx.$("#profile-button").click();
+      ctx.$('[data-menu-action="plan"]').click();
+      await ctx.until(() => ctx.$("#view-plan").classList.contains("active") && ctx.$$("#plan-compare li").length > 0, "Mi plan");
+      const locks = ctx.$$("#plan-compare .plan-col.pro li").filter((li) => li.textContent.includes("🔒")).length;
+      ctx.ok(locks === (want.pro ? 0 : 4), `${state}: ${want.pro ? "ningún privilegio bloqueado" : "4 privilegios Pro bloqueados"} (${locks})`);
+      ctx.ok(ctx.$$("#plan-compare .plan-col:not(.pro) li").length === 3, `${state}: lista los 3 privilegios Free del inversionista`);
+      ctx.ok(Boolean(ctx.$("#plan-status [data-checkout]")) === Boolean(want.cta), `${state}: Mi plan ${want.cta ? "ofrece" : "no ofrece"} pagar`);
+    }
+  };
+}

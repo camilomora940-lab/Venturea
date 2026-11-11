@@ -9,6 +9,9 @@ window.createMockSupabase = function createMockSupabase(db, options = {}) {
       const roleOf = (id) => (data.profiles || []).find((item) => item.id === id)?.role;
       return [{ total: rows.length, investors: rows.filter((row) => roleOf(row.follower_id) === "investor").length, companies: rows.filter((row) => roleOf(row.follower_id) === "company").length }];
     },
+    pro_user_ids: async ({ p_ids }, data) => (data.pro_ids || []).filter((id) => p_ids.includes(id)),
+    record_profile_view: async () => null,
+    startup_view_stats: async (_args, data) => (data.view_stats ? [data.view_stats] : { __error: "FEATURE_LOCKED: las estadísticas de visitas son una función Pro" }),
     ...(options.rpc || {})
   };
   const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -76,7 +79,9 @@ window.createMockSupabase = function createMockSupabase(db, options = {}) {
     rpc: async (name, args) => {
       log.push({ rpc: name, args });
       if (!rpc[name]) return { data: null, error: { message: `rpc ${name} no simulada` } };
-      return { data: await rpc[name](args, db), error: null };
+      const result = await rpc[name](args, db);
+      if (result && result.__error) return { data: null, error: { message: result.__error } };
+      return { data: result, error: null };
     },
     auth: {
       getSession: async () => ({ data: { session }, error: null }),

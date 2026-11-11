@@ -27,7 +27,7 @@
           <button class="primary-button auth-submit" type="submit" id="auth-submit">Crear cuenta gratis</button>
         </form>
         <p class="auth-switch"><span id="auth-switch-copy">¿Ya tienes cuenta?</span> <button type="button" id="auth-mode-toggle">Iniciar sesión</button></p>
-        <p class="auth-free-note">Sin pagos ni funciones premium. Las cuentas y los datos se comparten entre usuarios.</p>
+        <p class="auth-free-note">Empieza gratis con el plan Free; el plan Pro suma funciones extra. Las cuentas y los datos se comparten entre usuarios.</p>
       </div>
     </section>
     <div class="backend-status" id="backend-status" hidden></div>
@@ -48,10 +48,11 @@
         <div class="workspace-label" data-demo-only>TU ESPACIO</div>
         <button class="nav-link" data-view="startup" data-demo-only><span class="nav-icon">⌂</span>Mi startup</button>
         <div class="sidebar-bottom">
-          <div class="plan-card">
-            <div class="plan-top"><span class="plan-spark">✦</span><span class="plan-tag">PLAN FREE</span></div>
-            <strong>Gratis para toda la comunidad.</strong>
-            <p>Descubrimiento, perfiles, rondas y conexiones sin suscripciones ni pagos.</p>
+          <div class="plan-card" id="plan-card">
+            <div class="plan-top"><span class="plan-spark">✦</span><span class="plan-tag" id="plan-tag">PLAN FREE</span></div>
+            <strong id="plan-title">Estás en el plan Free.</strong>
+            <p id="plan-copy">Descubrimiento, perfiles, rondas y conexiones. Pro suma funciones extra.</p>
+            <button class="upgrade-button" id="plan-cta" data-open-plan hidden>Mejorar a Pro</button>
           </div>
           <div class="profile-wrap">
             <div class="profile-menu" id="profile-menu" role="menu" aria-label="Cuenta" hidden>
@@ -96,7 +97,7 @@
               <div class="stat-card"><span class="stat-icon mint">◈</span><span class="stat-label">Startups para ti</span><strong id="startup-count">128</strong><span class="stat-note">Perfiles chilenos publicados</span></div>
               <div class="stat-card"><span class="stat-icon lilac">♡</span><span class="stat-label">Candidatas compatibles</span><strong id="stat-matches">00</strong><span class="stat-note">Tras filtros obligatorios</span></div>
               <div class="stat-card"><span class="stat-icon peach">↗</span><span class="stat-label">Rondas abiertas</span><strong id="open-rounds-count">24</strong><span class="stat-note" id="open-rounds-note">En 6 sectores</span></div>
-              <div class="stat-card stat-pro"><span class="stat-icon yellow">✓</span><span class="stat-label">Acceso para todos</span><strong>Sin comisiones</strong><span class="stat-note">Las funciones son gratuitas</span></div>
+              <div class="stat-card stat-pro"><span class="stat-icon yellow">✓</span><span class="stat-label">Tu plan</span><strong id="stat-plan">Free</strong><span class="stat-note" id="stat-plan-note">Perfil, descubrimiento y conexiones</span></div>
             </div>
 
             <div class="section-heading">
@@ -117,15 +118,16 @@
                   <div class="tag-row" id="company-tags"></div>
                   <div class="company-metrics"><div><small>RONDA ACTUAL</small><strong id="company-round">Seed · USD 1.2M</strong></div><div><small>TRACCIÓN</small><strong id="company-traction">3.4x crecimiento</strong></div><div class="match-score"><small>COMPATIBILIDAD</small><strong id="company-fit">00% <span>✦</span></strong></div></div>
                   <div class="score-explanation"><div id="score-breakdown"></div><div class="score-reasons" id="score-reasons"></div><small id="score-note">Tu puntaje pondera sector (25%), etapa (20%), ticket (20%), mercado (15%), modelo (10%) y tracción (10%). La compatibilidad combina ambos puntajes; no predice inversión.</small></div>
-                  <div class="card-footer"><div class="founder"><span class="avatar founder-avatar" id="founder-avatar">CL</span><span><small>FUNDADORA</small><strong id="founder-name">Camila López</strong></span></div><div class="card-actions"><button class="secondary-button follow-button" id="follow-button" hidden>Seguir</button><button class="pass-button" id="pass-button" aria-label="Pasar startup">×</button><button class="pitch-button" id="pitch-button" hidden>▶ Ver pitch</button><button class="info-button" id="info-button">Ver perfil <span>↗</span></button><button class="like-button" id="like-button" aria-label="Me interesa">♡</button></div></div>
+                  <div class="card-footer"><div class="founder"><span class="avatar founder-avatar" id="founder-avatar">CL</span><span><small>FUNDADORA</small><strong id="founder-name">Camila López</strong></span></div><div class="card-actions"><span class="meter" id="interest-meter" hidden></span><button class="secondary-button follow-button" id="follow-button" hidden>Seguir</button><button class="pass-button" id="pass-button" aria-label="Pasar startup">×</button><button class="pitch-button" id="pitch-button" hidden>▶ Ver pitch</button><button class="info-button" id="info-button">Ver perfil <span>↗</span></button><button class="like-button" id="like-button" aria-label="Me interesa">♡</button></div></div>
                 </div>
               </div>
               <div class="empty-state no-compatible-card" id="no-compatible-startups" hidden><span>⌕</span><h3 id="empty-title">No hay startups que cumplan tu tesis</h3><p id="empty-copy">Amplía tus sectores, etapas o rango de inversión para ver más opciones.</p><button class="secondary-button" id="empty-edit-filters">Editar filtros</button></div>
               </div>
               <aside class="right-rail">
-                <div class="rail-card matching-card"><div class="rail-card-heading"><span class="rail-icon">⌘</span><span class="rail-menu">···</span></div><span class="rail-kicker">TU MATCH IDEAL</span><h3>La próxima gran idea puede estar a un swipe.</h3><p>Explora proyectos alineados con tus tesis de inversión y conecta directamente con sus fundadores.</p><div class="match-avatars"><span class="mini-avatar mini-one">N</span><span class="mini-avatar mini-two">L</span><span class="mini-avatar mini-three">+</span><span class="match-caption">Matching gratuito para todos</span></div></div>
+                <div class="rail-card matching-card"><div class="rail-card-heading"><span class="rail-icon">⌘</span><span class="rail-menu">···</span></div><span class="rail-kicker">TU MATCH IDEAL</span><h3>La próxima gran idea puede estar a un swipe.</h3><p>Explora proyectos alineados con tus tesis de inversión y conecta directamente con sus fundadores.</p><div class="match-avatars"><span class="mini-avatar mini-one">N</span><span class="mini-avatar mini-two">L</span><span class="mini-avatar mini-three">+</span><span class="match-caption">Compatibilidad orientativa</span></div></div>
                 <div class="rail-card filters-card"><div class="filter-heading"><h3 id="rail-title">Tu tesis de inversión</h3><button class="edit-button" id="edit-filters">Editar</button></div><div class="filter-group"><span id="rail-label-1">SECTORES</span><div class="filter-pills" id="investor-sector-pills"></div></div><div class="filter-group"><span id="rail-label-2">ETAPAS</span><div class="filter-value" id="investor-stage-value"></div></div><div class="filter-group"><span id="rail-label-3">TICKET</span><div class="filter-value" id="investor-ticket-value"></div></div><div class="filter-hint"><span>✦</span><span id="investor-compatible-count">Calculando compatibilidad...</span></div></div>
-                <div class="pro-rail"><span class="pro-star">✦</span><div><strong>Una comunidad abierta</strong><p>Perfiles, actualizaciones y conexiones sin costo.</p></div></div>
+                <div class="rail-card" id="advanced-card" hidden><div class="filter-heading"><h3>Filtros avanzados</h3><span class="pro-badge" id="advanced-badge">PRO</span></div><div class="advanced-fields" id="advanced-fields"><label>Ciudad<input id="adv-city" placeholder="Ej.: Valparaíso" /></label><label id="adv-sector-label" hidden>Sector<select id="adv-sector"></select></label><label id="adv-traction-label">Tracción mínima<select id="adv-traction"><option value="0">Cualquiera</option><option value="0.3">30 % o más</option><option value="0.5">50 % o más</option><option value="0.7">70 % o más</option></select></label><label id="adv-model-label">Modelo de negocio<select id="adv-model"><option value="all">Todos</option><option>B2B</option><option>B2B2C</option><option>B2C</option></select></label></div><p class="field-hint" id="advanced-lock" hidden>Función del plan Pro. <button class="text-button" data-open-plan>Ver plan</button></p></div>
+                <div class="pro-rail" id="pro-rail"><span class="pro-star">✦</span><div><strong id="pro-rail-title">Desbloquea Pro</strong><p id="pro-rail-copy">Funciones extra para sacarle más partido a Venturea.</p></div><button class="text-button" data-open-plan>Ver plan</button></div>
               </aside>
             </div>
             <div class="bottom-tip"><span>✦</span><span><strong>Un buen match empieza con curiosidad.</strong> Dale corazón a las startups que te interesan y abre una conversación.</span><button id="tip-close" aria-label="Cerrar consejo">×</button></div>
@@ -138,7 +140,7 @@
 
           <section class="view" id="view-updates">
             <div class="page-intro"><div class="eyebrow muted-eyebrow">EL PULSO DE TU PORTAFOLIO</div><h1>Actualizaciones<span class="heading-period">.</span></h1><p>Novedades de las startups que sigues, en un solo lugar.</p></div>
-            <div class="updates-banner"><span class="updates-live">●</span><div><strong>Actualizaciones de la comunidad</strong><p>Novedades compartidas por startups chilenas.</p></div><span class="pro-badge">GRATIS</span></div>
+            <div class="updates-banner"><span class="updates-live">●</span><div><strong>Actualizaciones de la comunidad</strong><p>Novedades compartidas por startups chilenas.</p></div><span class="pro-badge">COMUNIDAD</span></div>
             <div class="chip-row" id="post-chips" role="group" aria-label="Filtrar por categoría"></div>
             <div class="fund-toolbar"><select id="post-sector-filter" aria-label="Filtrar por sector"></select><label class="switch" id="post-following-label"><input type="checkbox" id="post-following-only" role="switch" /><span class="switch-track"></span><span>Solo de quienes sigo</span></label></div>
             <div class="update-list" id="update-list"></div>
@@ -153,6 +155,13 @@
 
           <section class="view" id="view-profile"><div class="profile-page" id="profile-page"></div></section>
 
+          <section class="view" id="view-plan">
+            <div class="page-intro"><div class="eyebrow muted-eyebrow">TU SUSCRIPCIÓN</div><h1>Mi plan<span class="heading-period">.</span></h1><p>Qué incluye tu plan y cómo vas este mes.</p></div>
+            <div class="plan-status" id="plan-status"></div>
+            <div class="plan-compare" id="plan-compare"></div>
+            <p class="form-disclaimer" id="plan-footnote">Los privilegios Pro los decide siempre la base de datos según el estado real del pago: lo que ves aquí solo lo refleja. Si algo no coincide, recarga la página.</p>
+          </section>
+
           <section class="view" id="view-company">
             <div class="page-intro page-intro-row"><div><div class="eyebrow muted-eyebrow">TU PRESENCIA CORPORATIVA</div><h1>Tu empresa<span class="heading-period">.</span></h1><p>Cuenta qué buscas y encuentra startups con quienes colaborar.</p></div><button class="primary-button" id="edit-company">Editar perfil de empresa</button></div>
             <div class="startup-dashboard"><div class="dashboard-profile"><div class="dashboard-cover" id="company-cover"></div><div class="dashboard-company-logo" id="company-logo-dash">E</div><div class="dashboard-company-info"><span class="verified-pill">✓ PERFIL PÚBLICO</span><h2 id="company-dash-name">Tu empresa</h2><p id="company-dash-desc"></p><div class="tag-row" id="company-dash-tags"></div><button class="secondary-button" data-upload="avatar">Cambiar logo</button> <button class="secondary-button" data-upload="banner">Cambiar banner</button> <button class="secondary-button" id="view-own-profile-company">Ver perfil público</button></div></div><div class="dashboard-side"><div class="dashboard-stat"><span>Desafíos abiertos</span><strong id="company-open-challenges">0</strong><small>Visibles para startups</small></div><div class="dashboard-stat"><span>Startups seguidas</span><strong id="company-followed-count">0</strong><small>Tu lista de interés</small></div><div class="dashboard-stat"><span>Intereses enviados</span><strong id="company-interests-count">0</strong><small>Esperando respuesta o match</small></div></div></div>
@@ -166,7 +175,7 @@
 
           <section class="view" id="view-following">
             <div class="page-intro"><div class="eyebrow muted-eyebrow">TU LISTA DE INTERÉS</div><h1>Seguidos<span class="heading-period">.</span></h1><p>Las startups que sigues y los intereses que has enviado.</p></div>
-            <div class="section-heading"><div><h2>Startups que sigues</h2></div></div>
+            <div class="section-heading"><div><h2>Startups que sigues</h2></div><button class="secondary-button" id="export-lists" data-export-lists>Exportar CSV <span class="pro-badge">PRO</span></button></div>
             <div class="match-list" id="followed-list"></div>
             <div class="section-heading startup-update-heading"><div><h2>Intereses enviados</h2></div></div>
             <div class="match-list" id="sent-interests"></div>
@@ -174,7 +183,7 @@
 
           <section class="view" id="view-startup">
             <div class="page-intro page-intro-row"><div><div class="eyebrow muted-eyebrow">PRESENCIA QUE ABRE PUERTAS</div><h1>Tu startup<span class="heading-period">.</span></h1><p>Cuenta lo que estás construyendo y encuentra a quienes creen en ello.</p></div><button class="primary-button" id="startup-create-fund">＋ Abrir una ronda</button></div>
-            <div class="startup-dashboard"><div class="dashboard-profile"><div class="dashboard-cover"></div><div class="dashboard-company-logo">N</div><div class="dashboard-company-info"><span class="verified-pill">✓ PERFIL PÚBLICO</span><h2>Nébula Health</h2><p>Diagnóstico preventivo con IA · Santiago, Chile</p><div class="tag-row"><span class="tag">Healthtech</span><span class="tag">Inteligencia artificial</span><span class="tag">Seed</span></div><button class="secondary-button" id="edit-startup">Editar perfil</button> <button class="secondary-button" data-upload="avatar">Cambiar logo</button> <button class="secondary-button" data-upload="banner">Cambiar banner</button> <button class="secondary-button" id="view-own-profile">Ver perfil público</button></div></div><div class="dashboard-side"><div class="dashboard-stat"><span>Seguidores inversionistas</span><strong id="followers-investors">0</strong><small>Siguen tu startup</small></div><div class="dashboard-stat"><span>Seguidores empresas</span><strong id="followers-companies">0</strong><small>Siguen tu startup</small></div><div class="dashboard-stat"><span>Inversores interesados</span><strong id="interested-count">0</strong><small>Solicitudes recibidas</small></div><div class="dashboard-stat"><span>Tu perfil</span><strong id="round-status">Sin publicar</strong><small>Visible para inversores</small></div></div></div>
+            <div class="startup-dashboard"><div class="dashboard-profile"><div class="dashboard-cover"></div><div class="dashboard-company-logo">N</div><div class="dashboard-company-info"><span class="verified-pill">✓ PERFIL PÚBLICO</span><h2>Nébula Health</h2><p>Diagnóstico preventivo con IA · Santiago, Chile</p><div class="tag-row"><span class="tag">Healthtech</span><span class="tag">Inteligencia artificial</span><span class="tag">Seed</span></div><button class="secondary-button" id="edit-startup">Editar perfil</button> <button class="secondary-button" data-upload="avatar">Cambiar logo</button> <button class="secondary-button" data-upload="banner">Cambiar banner</button> <button class="secondary-button" id="view-own-profile">Ver perfil público</button></div></div><div class="dashboard-side"><div class="dashboard-stat"><span>Seguidores inversionistas</span><strong id="followers-investors">0</strong><small>Siguen tu startup</small></div><div class="dashboard-stat"><span>Seguidores empresas</span><strong id="followers-companies">0</strong><small>Siguen tu startup</small></div><div class="dashboard-stat"><span>Visitas de perfil</span><strong id="views-30d">🔒</strong><small id="views-note">Función Pro</small></div><div class="dashboard-stat"><span>Inversores interesados</span><strong id="interested-count">0</strong><small>Solicitudes recibidas</small></div><div class="dashboard-stat"><span>Tu perfil</span><strong id="round-status">Sin publicar</strong><small>Visible para inversores</small></div></div></div>
             <div class="section-heading startup-update-heading"><div><div class="eyebrow muted-eyebrow">TÚ DECIDES CUÁNDO</div><h2>Buscando financiamiento</h2></div></div>
             <div class="funding-panel" id="funding-panel">
               <div class="funding-head"><label class="switch"><input type="checkbox" id="funding-switch" role="switch" /><span class="switch-track"></span><span id="funding-switch-label">No</span></label><div class="funding-status" id="funding-status">No estás buscando financiamiento.</div><div class="funding-actions" id="funding-actions"></div></div>
@@ -230,6 +239,7 @@
           <div class="form-row"><label>Ticket mínimo (USD)<input required name="checkMin" type="number" min="1" value="25000" /></label><label>Ticket máximo (USD)<input required name="checkMax" type="number" min="1" value="150000" /></label></div>
           <label>Descripción<textarea required name="description" rows="3" minlength="20" maxlength="1000"></textarea></label>
           <label>Modelo de negocio<select name="businessModel"><option>B2B</option><option>B2B2C</option><option>B2C</option></select></label>
+          <label>Video propio (plan Pro)<input type="file" id="pitch-file" accept="video/mp4,video/webm" /><span class="field-hint" id="pitch-file-hint">MP4 o WebM, hasta 100 MB. Disponible en el plan Pro.</span></label>
           <label>Video pitch (enlace de YouTube, Vimeo o Loom)<input name="pitchVideo" type="url" maxlength="300" placeholder="https://www.youtube.com/watch?v=..." /><span class="field-hint">Ideal: 60–120 segundos. Cuenta el problema, tu solución, tu tracción y lo que pides.</span></label>
 
           <p class="auth-error" id="startup-profile-error" role="alert" hidden></p>

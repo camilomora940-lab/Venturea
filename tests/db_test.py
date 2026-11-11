@@ -129,7 +129,7 @@ def run_all(db):
     check(db.one("select count(*) from subscriptions where status = 'free'") == 2, "todos los usuarios existentes quedan en plan Free")
     check(db.one("select count(*) from information_schema.columns where table_name = 'investor_preferences' and column_name in ('sectors','sector_expertise')") == 0, "investor_preferences ya no duplica sectores")
 
-    db.migrate(only=["004", "005"])
+    db.migrate(only=["004", "005", "006"])
 
     print("Alta de usuarios")
     adm = signup(db, "adm@x.cl", "admin", "Quiere Admin")
@@ -290,7 +290,126 @@ def run_seed(db):
         db.run(open(os.path.join(ROOT, "supabase", "seed.sql"), encoding="utf-8").read())
         check(False, "seed.sql no se puede ejecutar dos veces sin reset")
     except Exception:  # noqa: BLE001
+        db.run("rollback")  # el script abre su propia transacción y queda abortada
         check(True, "seed.sql no se puede ejecutar dos veces sin reset")
+    run_freemium(db)
+
+
+def run_freemium(db):
+    uid = lambda email: db.one("select id from auth.users where email = %s", (f"{email}@venturea.test",))
+    entitlement = lambda email: db.as_user(uid(email), "select effective_status, is_pro, array_length(features, 1) from my_entitlements")[1]
+    print("Freemium: los 7 estados de pago, en la base")
+    expected = {"i01": ("free", False), "i02": ("active", True), "i03": ("trialing", True), "i04": ("past_due", True),
+                "i05": ("expired", False), "i06": ("canceled", True), "i07": ("expired", False)}
+    for email, (state, pro) in expected.items():
+        rows = entitlement(email)
+        check(len(rows) == 1 and rows[0][0] == state and rows[0][1] == pro, f"{email}: estado {state}, Pro={pro} (obtuvo {rows})")
+        flag = db.as_user(uid(email), "select has_feature('unlimited_interests')")[1][0][0]
+        check(flag == pro, f"{email}: has_feature('unlimited_interests') = {pro}")
+    check(db.as_user(uid("i02"), "select has_feature('follower_list')")[1][0][0] is False, "un inversionista Pro no recibe privilegios de startup")
+    check(db.as_user(uid("s01"), "select has_feature('follower_list'), has_feature('video_upload'), has_feature('unlimited_interests')")[1][0] == (True, True, False), "una startup Pro recibe solo privilegios de startup")
+    check(db.as_user(uid("s03"), "select has_feature('follower_list')")[1][0][0] is False, "una startup Free no tiene privilegios Pro")
+    check(db.as_user(uid("i02"), "select user_id from my_entitlements where user_id <> %s", (uid("i02"),))[1] == [], "my_entitlements solo muestra la fila propia")
+    status, _ = db.as_user(uid("i02"), "select pro_active(%s)", (uid("i02"),))
+    check(status == "ok", "pro_active es consultable por usuarios autenticados")
+    db.run("reset role"); db.run("set role anon")
+    try:
+        db.run("select has_feature('x')"); anon_ok = True
+    except Exception:  # noqa: BLE001
+        anon_ok = False
+    db.run("reset role")
+    check(not anon_ok, "anon no puede consultar privilegios")
+
+    print("Freemium: un usuario Free no logra darse Pro")
+    me = uid("i01")
+    for label, sql in [("editando su suscripción", "update subscriptions set plan_id = 'investor_pro', status = 'active' where user_id = %s"),
+                       ("insertando otra suscripción", "insert into subscriptions (user_id, plan_id, status) values (%s, 'investor_pro', 'active')"),
+                       ("editando los planes", "update plans set is_paid = false where id = (select plan_id from subscriptions where user_id = %s)"),
+                       ("escribiendo eventos de pago", "insert into payment_events (id, user_id, type) select 'x', %s, 'paid'"),
+                       ("cambiando su rol", "update profiles set role = 'startup' where id = %s")]:
+        status, msg = db.as_user(me, sql, (me,))
+        check(status == "error" and "permission denied" in msg, f"no puede darse Pro {label}")
+    status, msg = db.as_user(me, "select expire_subscriptions()")
+    check(status == "error", "no puede ejecutar la tarea de vencimiento")
+    check(entitlement("i01")[0][1] is False, "tras los intentos sigue siendo Free")
+
+    print("Freemium: límite de 10 'Me interesa' al mes")
+    free_id, pro_id, grace_id, lapsed_id = uid("i01"), uid("i02"), uid("i04"), uid("i05")
+    def fill(user, target):
+        used = db.as_user(user, "select interests_used_month from my_entitlements")[1][0][0]
+        free_startups = [r[0] for r in db.run("select id from startup_profiles where id not in (select startup_id from interests where investor_id = %s) order by name", (user,))]
+        outcome = ("ok", None)
+        for startup in free_startups[: max(0, target - used)]:
+            outcome = db.as_user(user, "insert into interests (investor_id, startup_id) values (%s, %s)", (user, startup))
+            if outcome[0] == "error":
+                break
+        return outcome, db.as_user(user, "select interests_used_month from my_entitlements")[1][0][0]
+    outcome, used = fill(free_id, 10)
+    check(outcome[0] == "ok" and used == 10, f"un usuario Free llega a 10 este mes ({used})")
+    extra = [r[0] for r in db.run("select id from startup_profiles where id not in (select startup_id from interests where investor_id = %s) limit 1", (free_id,))]
+    status, msg = db.as_user(free_id, "insert into interests (investor_id, startup_id) values (%s, %s)", (free_id, extra[0]))
+    check(status == "error" and "LIMIT_INTERESTS" in msg, "el interés 11 de un usuario Free se rechaza en la base")
+    outcome, used = fill(pro_id, 14)
+    check(outcome[0] == "ok" and used == 14, f"un usuario Pro active supera los 10 ({used})")
+    outcome, used = fill(grace_id, 12)
+    check(outcome[0] == "ok" and used == 12, "past_due dentro de la gracia conserva el privilegio")
+    outcome, used = fill(lapsed_id, 12)
+    check(outcome[0] == "error" and "LIMIT_INTERESTS" in outcome[1] and used == 10, "past_due con la gracia vencida vuelve al límite Free")
+
+    print("Freemium: desafíos de empresa")
+    company = lambda email: db.one("select id from company_profiles where owner_id = %s", (uid(email),))
+    ins = "insert into company_challenges (company_id, title, description) values (%s, 'Otro desafío', 'Una descripción suficiente')"
+    status, msg = db.as_user(uid("c03"), ins, (company("c03"),))
+    check(status == "error" and "LIMIT_CHALLENGES" in msg, "una empresa Free no publica un segundo desafío abierto")
+    check(db.as_user(uid("c01"), ins, (company("c01"),))[0] == "ok", "una empresa Pro publica varios")
+    check(db.as_user(uid("c02"), ins, (company("c02"),))[0] == "ok", "cancelada con periodo vigente conserva el privilegio")
+    db.as_user(uid("c03"), "update company_challenges set status = 'closed' where company_id = %s", (company("c03"),))
+    check(db.as_user(uid("c03"), ins, (company("c03"),))[0] == "ok", "cerrando el desafío, la empresa Free puede publicar otro")
+    status, msg = db.as_user(uid("c03"), "update company_challenges set status = 'open' where company_id = %s and title <> 'Otro desafío'", (company("c03"),))
+    check(db.one("select count(*) from company_challenges where company_id = %s and status = 'open'", (company("c03"),)) == 1, "reabrir un desafío no esquiva el límite Free")
+
+    print("Freemium: seguidores, estadísticas y video")
+    sid = db.one("select id from startup_profiles where owner_id = %s", (uid("s01"),))
+    total = db.one("select count(*) from follows where startup_id = %s", (sid,))
+    check(total > 0, "la startup de prueba tiene seguidores")
+    check(db.as_user(uid("s01"), "select count(*) from follows where startup_id = %s", (sid,))[1][0][0] == total, "la startup Pro ve la lista de quién la sigue")
+    sid3 = db.one("select id from startup_profiles where owner_id = %s", (uid("s03"),))
+    check(db.as_user(uid("s03"), "select count(*) from follows where startup_id = %s", (sid3,))[1][0][0] == 0, "la startup Free no ve la lista de seguidores")
+    check(db.as_user(uid("i02"), "select count(*) from follows where startup_id = %s", (sid,))[1][0][0] == total, "el inversionista Pro ve quién sigue a una startup")
+    check(db.as_user(uid("i05"), "select count(*) from follows where startup_id = %s and follower_id <> %s", (sid, uid("i05")))[1][0][0] == 0, "el inversionista sin Pro no ve a los demás seguidores")
+    db.as_user(uid("i01"), "select record_profile_view(%s)", (sid,))
+    db.as_user(uid("i01"), "select record_profile_view(%s)", (sid,))
+    db.as_user(uid("s01"), "select record_profile_view(%s)", (sid,))
+    status, rows = db.as_user(uid("s01"), "select * from startup_view_stats(%s)", (sid,))
+    check(status == "ok" and rows == [(1, 1, 1)], f"estadísticas Pro: una visita por visitante y día, sin contar al dueño ({rows})")
+    status, msg = db.as_user(uid("s03"), "select * from startup_view_stats(%s)", (sid3,))
+    check(status == "error" and "FEATURE_LOCKED" in msg, "las estadísticas están bloqueadas para una startup Free")
+    status, msg = db.as_user(uid("s01"), "select * from startup_view_stats(%s)", (sid3,))
+    check(status == "error", "ni siquiera una Pro lee estadísticas de otra startup")
+    check(db.as_user(uid("s01"), "insert into storage.objects (bucket_id, name) values ('pitch-videos', %s)", (f"{uid('s01')}/pitch.mp4",))[0] == "ok", "la startup Pro sube su video")
+    check(db.as_user(uid("s03"), "insert into storage.objects (bucket_id, name) values ('pitch-videos', %s)", (f"{uid('s03')}/pitch.mp4",))[0] == "error", "la startup Free no sube video propio")
+    check(db.one("select file_size_limit from storage.buckets where id = 'pitch-videos'") == 100 * 1024 * 1024, "videos limitados a 100 MB")
+    pro_ids = {r[0] for r in db.as_user(uid("i01"), "select * from pro_user_ids(array[%s, %s, %s]::uuid[])", (uid("s01"), uid("s03"), uid("s02")))[1]}
+    check(pro_ids == {uid("s01"), uid("s02")}, "pro_user_ids marca solo a las startups Pro (insignia y destacada)")
+
+    print("Freemium: alertas, cobros y vencimiento")
+    s07 = db.one("select id from startup_profiles where owner_id = %s", (uid("s07"),))
+    db.run("delete from follows")
+    db.as_user(uid("s07"), "update funding_rounds set status = 'open' where startup_id = %s and status = 'paused'", (s07,))
+    got = lambda email: db.one("select count(*) from notifications where user_id = %s and type = 'round_opened'", (uid(email),))
+    check(got("i06") == 1, "un inversionista Pro con ese sector recibe alerta de la nueva ronda aunque no siga a la startup")
+    sid_health = db.one("select id from startup_profiles where owner_id = %s", (uid("s01"),))
+    db.as_user(uid("s01"), "update funding_rounds set status = 'paused' where startup_id = %s and status = 'open'", (sid_health,))
+    db.as_user(uid("s01"), "update funding_rounds set status = 'open' where startup_id = %s and status = 'paused'", (sid_health,))
+    check(got("i01") == 0 and got("i08") == 0, "los inversionistas Free que no siguen no reciben la alerta")
+    db.run("update subscriptions set status = 'past_due', current_period_end = now() - interval '1 day' where user_id = %s", (uid("i08"),))
+    check(db.one("select count(*) from notifications where user_id = %s and type = 'billing'", (uid("i08"),)) == 1, "pasar a past_due crea un aviso de cobro")
+    changed = db.one("select expire_subscriptions()")
+    states = dict(db.run("select u.email, s.status from subscriptions s join auth.users u on u.id = s.user_id where u.email like 'i0%'"))
+    check(states["i05@venturea.test"] == "expired", "la tarea diaria expira past_due con la gracia vencida")
+    check(states["i04@venturea.test"] == "past_due" and states["i03@venturea.test"] == "trialing" and states["i02@venturea.test"] == "active", "y no toca a quienes siguen vigentes")
+    check(changed >= 1, f"expire_subscriptions informa lo cambiado ({changed})")
+    check(db.one("select count(*) from subscriptions s join plans p on p.id = s.plan_id where s.status = 'expired' and p.is_paid") >= 2, "los vencidos conservan su plan y datos (solo se bloquean)")
 
 
 if __name__ == "__main__":

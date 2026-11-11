@@ -3,7 +3,7 @@
   "private": true,
   "description": "Sin dependencias de ejecución. Las pruebas usan Edge/Chrome y, para la base de datos, pip install pgserver psycopg2-binary pglast.",
   "scripts": {
-    "test": "node tests/unit.mjs && node tests/run.mjs && node tests/contrast.mjs && python tests/db_test.py && python tests/check-sql.py",
+    "test": "node tests/unit.mjs && node --test tests/webhook.test.mjs && node tests/run.mjs && node tests/contrast.mjs && python tests/db_test.py && python tests/check-sql.py",
     "seed": "node scripts/seed-users.mjs",
     "reset": "node scripts/seed-users.mjs --reset"
   }

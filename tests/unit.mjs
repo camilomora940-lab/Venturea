@@ -54,3 +54,19 @@ test("recorte: llena la salida, mantiene la proporción y nunca se sale de la im
 });
 
 console.log(`\n${passed} pruebas pasaron`);
+
+console.log("media.js (video y CSV)");
+test("validación de video propio: MP4/WebM y hasta 100 MB", () => {
+  assert.equal(media.validateVideoFile({ type: "video/mp4", size: 1000 }), "");
+  assert.equal(media.validateVideoFile({ type: "video/webm", size: 100 * 1048576 }), "");
+  assert.match(media.validateVideoFile({ type: "video/quicktime", size: 1000 }), /MP4 o WebM/);
+  assert.match(media.validateVideoFile({ type: "video/mp4", size: 100 * 1048576 + 1 }), /máximo es 100 MB/);
+  assert.match(media.validateVideoFile({ type: "video/mp4", size: 0 }), /vacío/);
+  assert.match(media.validateVideoFile(null), /Selecciona/);
+});
+test("CSV: escapa comas, comillas y saltos, y neutraliza fórmulas", () => {
+  assert.equal(media.toCsv([["a", "b,c", 'd"e', "f\ng"]]), 'a,"b,c","d""e","f\ng"');
+  assert.equal(media.toCsv([["=SUMA(1+1)", "+1", "-1", "@x", "normal", null]]), "'=SUMA(1+1),'+1,'-1,'@x,normal,");
+  assert.equal(media.toCsv([["a"], ["b"]]), "a\r\nb");
+});
+console.log(`\n${passed} pruebas pasaron (total)`);

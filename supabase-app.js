@@ -78,7 +78,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   };
   const VIEW_TITLES = {
     discover: "Descubrir", matches: "Intereses y matches", updates: "Actualizaciones", funds: "Rondas abiertas", startup: "Mi startup",
-    company: "Mi empresa", challenges: "Mis desafíos", following: "Seguidos", profile: "Perfil"
+    company: "Mi empresa", challenges: "Mis desafíos", following: "Seguidos", profile: "Perfil", plan: "Mi plan"
   };
   const ROLE_LABELS = { investor: "Inversor/a", startup: "Startup chilena", company: "Empresa", admin: "Administración" };
   const WORKSPACE_LABELS = { investor: "ESPACIO DE INVERSIÓN", startup: "ESPACIO DE STARTUP", company: "ESPACIO DE EMPRESA", admin: "ADMINISTRACIÓN" };
@@ -223,8 +223,11 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       startup.desired_stages.some((stage) => investorPreferences.stages.includes(stage));
   }
 
+  // Las startups Pro aparecen destacadas: +10 puntos solo para ordenar (el porcentaje mostrado no cambia).
+  const featuredScore = (startup) => startup.assessment.combinedScore + (startup.is_pro ? 10 : 0);
+
   function orderCandidates(candidates) {
-    const sorted = candidates.sort((a, b) => b.assessment.combinedScore - a.assessment.combinedScore);
+    const sorted = candidates.sort((a, b) => featuredScore(b) - featuredScore(a));
     const buckets = new Map();
     sorted.forEach((startup) => {
       const bucket = buckets.get(startup.sector_id) || [];
@@ -266,10 +269,14 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       const names = new Map(ownerProfiles.map((owner) => [owner.id, owner.full_name]));
       startups = startups.map((startup) => ({ ...startup, founder_name: names.get(startup.owner_id) || "Equipo fundador" }));
     }
+    const { data: proIds, error: proError } = await supabaseClient.rpc("pro_user_ids", { p_ids: [...new Set(startups.map((startup) => startup.owner_id))] });
+    if (proError) throw proError;
+    proOwners = new Set(proIds || []);
+    startups = startups.map((startup) => ({ ...startup, is_pro: proOwners.has(startup.owner_id) }));
     rankedStartups = profile.role === "investor"
-      ? orderCandidates(startups.filter(passesFilters).map((startup) => ({ ...startup, assessment: assess(startup) })))
+      ? orderCandidates(startups.filter(passesFilters).filter(passesAdvanced).map((startup) => ({ ...startup, assessment: assess(startup) })))
       : profile.role === "company" && companyProfile
-        ? startups.map((startup) => ({ ...startup, assessment: assessCompany(startup) })).sort((a, b) => b.assessment.combinedScore - a.assessment.combinedScore)
+        ? startups.filter(passesAdvanced).map((startup) => ({ ...startup, assessment: assessCompany(startup) })).sort((a, b) => featuredScore(b) - featuredScore(a))
         : [];
     $("#stat-matches").textContent = String(rankedStartups.length).padStart(2, "0");
     $("#investor-compatible-count").textContent = `${rankedStartups.length} startups compatibles`;
@@ -314,7 +321,8 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     ].map((reason) => `<span>${reason}</span>`).join("");
     $("#founder-name").textContent = startup.founder_name;
     $("#founder-avatar").textContent = startup.founder_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
-    $("#company-tags").innerHTML = [sectorName(startup.sector_id), startup.business_model, startup.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("") + (startup.round ? '<span class="tag funding">Buscando financiamiento</span>' : "");
+    $("#company-tags").innerHTML = [sectorName(startup.sector_id), startup.business_model, startup.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("") + (startup.round ? '<span class="tag funding">Buscando financiamiento</span>' : "") + (startup.is_pro ? PRO_TAG : "");
+    setText(".cover-label", startup.is_pro ? "★ STARTUP DESTACADA · PRO" : "STARTUP");
     $("#bookmark-button").hidden = true;
     renderFollowButtons();
   }
@@ -406,7 +414,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     paintBanner($("#view-startup .dashboard-cover"), startupProfile.banner_url);
     $("#view-startup .dashboard-company-info h2").textContent = startupProfile.name;
     $("#view-startup .dashboard-company-info > p").textContent = `${startupProfile.description} · ${startupProfile.city}, Chile`;
-    $("#view-startup .dashboard-company-info .tag-row").innerHTML = [sectorName(startupProfile.sector_id), startupProfile.business_model, startupProfile.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
+    $("#view-startup .dashboard-company-info .tag-row").innerHTML = (hasFeature("pro_badge") ? PRO_TAG : "") + [sectorName(startupProfile.sector_id), startupProfile.business_model, startupProfile.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
     $("#startup-profile-form").elements.name.value = startupProfile.name;
     $("#startup-profile-form").elements.city.value = startupProfile.city;
     fillStartupProfileForm();
@@ -414,6 +422,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     loadFundingRounds().catch((error) => reportFailure("No pudimos cargar tus rondas", error));
     loadOwnPosts().catch((error) => reportFailure("No pudimos cargar tus publicaciones", error));
     loadFollowerStats().catch((error) => reportFailure("No pudimos cargar tus seguidores", error));
+    loadVisitStats().catch((error) => reportFailure("No pudimos cargar tus visitas", error));
   }
 
   async function loadWorkspace() {
@@ -430,6 +439,10 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     fundingRounds = [];
     await loadPostCategories();
     $("#post-following-only").checked = false;
+    entitlements = { effective_status: "free", is_pro: false, features: [], free_limits: {}, interests_used_month: 0, open_challenges: 0 };
+    proOwners = new Set();
+    Object.assign(advanced, { city: "", sector: "all", traction: 0, model: "all" });
+    await loadEntitlements();
     $("#post-following-label").hidden = !["investor", "company"].includes(profile.role);
     startupProfile = null;
     companyProfile = null;
@@ -475,6 +488,9 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     $("#funding-switch").addEventListener("change", handleFundingSwitch, { signal });
     $("#funding-panel").addEventListener("click", handleFundingClick, { signal });
     $("#round-form").addEventListener("submit", saveRound, { signal });
+    $("#advanced-fields").addEventListener("change", () => applyAdvancedFilters().catch((error) => reportFailure("No pudimos aplicar los filtros", error)), { signal });
+    // Si el pago cambia mientras la pestaña estaba abierta, el plan se actualiza al volver a ella.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) loadEntitlements().catch(() => {}); }, { signal });
     startNotifications(signal);
     if (profile.role === "investor") {
       selectedIndex = 0;
@@ -580,7 +596,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       else if (profile.role === "company") openCompanyEditor();
       else if (profile.role === "investor") openPreferences();
     }
-    if (action === "plan") notify("Estás en el plan Free: perfil, descubrimiento y conexiones incluidos.");
+    if (action === "plan") openPlan();
     if (action === "signout") signOut();
   }
 
@@ -892,7 +908,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     paintBanner($("#company-cover"), companyProfile.banner_url);
     setText("#company-dash-name", companyProfile.name);
     setText("#company-dash-desc", `${companyProfile.description} · ${companyProfile.city}, Chile`);
-    $("#company-dash-tags").innerHTML = [sectorName(companyProfile.sector_id), `${companyProfile.size} personas`, ...(companyProfile.collaboration_types || []).map(collaborationName)]
+    $("#company-dash-tags").innerHTML = (hasFeature("pro_badge") ? PRO_TAG : "") + [sectorName(companyProfile.sector_id), `${companyProfile.size} personas`, ...(companyProfile.collaboration_types || []).map(collaborationName)]
       .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
     loadChallenges().catch((error) => reportFailure("No pudimos cargar tus desafíos", error));
     loadFollowing().catch((error) => reportFailure("No pudimos cargar tus seguidos", error));
@@ -902,7 +918,9 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     const { data, error } = await supabaseClient.from("company_challenges").select("*").eq("company_id", companyProfile.id).order("created_at", { ascending: false });
     if (error) throw error;
     const challenges = data || [];
-    setText("#company-open-challenges", challenges.filter((challenge) => challenge.status === "open").length);
+    const openCount = challenges.filter((challenge) => challenge.status === "open").length;
+    setText("#company-open-challenges", openCount);
+    setText("#challenge-note", entitlements.is_pro ? "Con tu plan Pro puedes publicar desafíos ilimitados." : `Plan Free: ${openCount} de ${challengeLimit() ?? 1} desafío abierto. Con Pro son ilimitados.`);
     $("#challenge-list").innerHTML = challenges.length
       ? challenges.map((challenge) => `<article class="update-item"><div class="update-copy"><strong>${escapeHtml(challenge.title)} <span class="tag">${challenge.status === "open" ? "Abierto" : "Cerrado"}</span></strong><small>${new Date(challenge.created_at).toLocaleDateString("es-CL")}</small><p>${escapeHtml(challenge.description)}</p></div><button class="secondary-button" data-challenge-toggle="${challenge.id}" data-status="${challenge.status === "open" ? "closed" : "open"}">${challenge.status === "open" ? "Cerrar" : "Reabrir"}</button></article>`).join("")
       : '<div class="empty-state"><span>⚑</span><h3>Aún no publicas desafíos</h3><p>Cuéntales a las startups qué problema quieres resolver.</p></div>';
@@ -915,7 +933,10 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     const { error } = await supabaseClient.from("company_challenges").insert({
       company_id: companyProfile.id, title: form.elements.title.value.trim(), description: form.elements.description.value.trim()
     });
-    if (error) return reportFailure("No pudimos publicar el desafío", error);
+    if (error) {
+      if (/LIMIT_CHALLENGES/.test(error.message)) return notify("El plan Free permite un desafío abierto. Cierra el actual o pasa a Pro para publicar más.");
+      return reportFailure("No pudimos publicar el desafío", error);
+    }
     form.reset();
     notify("Desafío publicado.");
     await loadChallenges();
@@ -939,7 +960,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   let openProfileRef = null;
 
   function profileShell({ bannerUrl, photoUrl, initials, title, subtitle, tags = [], meta = "", actions = "", body = "" }) {
-    return `<article class="profile-card"><div class="profile-banner" data-bg="${escapeHtml(bannerUrl || "")}"></div><div class="profile-head"><div class="profile-photo" data-bg="${escapeHtml(photoUrl || "")}">${photoUrl ? "" : escapeHtml(initials)}</div><div class="profile-title"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(subtitle)}</p><div class="tag-row">${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>${meta}</div><div class="profile-actions">${actions}</div></div><div class="profile-body">${body}</div></article>`;
+    return `<article class="profile-card"><div class="profile-banner" data-bg="${escapeHtml(bannerUrl || "")}"></div><div class="profile-head"><div class="profile-photo" data-bg="${escapeHtml(photoUrl || "")}">${photoUrl ? "" : escapeHtml(initials)}</div><div class="profile-title"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(subtitle)}</p><div class="tag-row">${tags.map((tag) => `<span class="tag${tag.startsWith("★") ? " pro-tag" : ""}">${escapeHtml(tag)}</span>`).join("")}</div>${meta}</div><div class="profile-actions">${actions}</div></div><div class="profile-body">${body}</div></article>`;
   }
   const profileSection = (title, content) => `<section class="profile-section"><h3>${title}</h3>${content}</section>`;
   const postCards = (posts, author) => posts.length
@@ -979,19 +1000,25 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       const own = startup.owner_id === user.id;
       const embed = startup.pitch_video_url ? window.VentureaMedia.toEmbedUrl(startup.pitch_video_url) : null;
       const canInterest = !own && ["investor", "company"].includes(profile.role);
+      const ownerPro = await isProUser(startup.owner_id);
+      const fileVideo = ownerPro && ownVideoUrl(startup.pitch_video_file_url)
+        ? `<video class="profile-video" controls preload="metadata" src="${escapeHtml(startup.pitch_video_file_url)}"></video>` : "";
+      const followerSection = await followerListSection(startup, own);
+      if (!own) supabaseClient.rpc("record_profile_view", { p_startup_id: id }).then(() => {}, () => {});
       return profileShell({
         bannerUrl: startup.banner_url, photoUrl: startup.logo_url, initials: startup.name.slice(0, 1).toUpperCase(),
         title: startup.name, subtitle: `${startup.city}, Chile · Fundador/a: ${owner.data?.full_name || "Equipo fundador"}`,
-        tags: [sectorName(startup.sector_id), startup.business_model, startup.stage, ...(round ? ["Buscando financiamiento"] : [])],
+        tags: [sectorName(startup.sector_id), startup.business_model, startup.stage, ...(round ? ["Buscando financiamiento"] : []), ...(ownerPro ? ["★ Pro"] : [])],
         meta: followerLine(counts),
         actions: (own ? '<button class="secondary-button" data-edit-own>Editar perfil</button><button class="secondary-button" data-upload="avatar">Cambiar logo</button><button class="secondary-button" data-upload="banner">Cambiar banner</button>' : "") +
           (canFollow() && !own ? `<button class="secondary-button" data-follow="${startup.id}">Seguir</button>` : "") +
           (canInterest ? `<button class="primary-button small-button" data-profile-interest="${startup.id}">♡ Me interesa</button>` : ""),
         body: profileSection("Acerca de", `<p>${escapeHtml(startup.description)}</p>`) +
-          (embed ? profileSection("Video pitch", `<div class="video-frame"><iframe title="Video pitch de ${escapeHtml(startup.name)}" src="${embed}" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"></iframe></div>`) : "") +
+          (fileVideo ? profileSection("Video pitch", fileVideo) : embed ? profileSection("Video pitch", `<div class="video-frame"><iframe title="Video pitch de ${escapeHtml(startup.name)}" src="${embed}" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"></iframe></div>`) : "") +
           profileSection("Financiamiento", round
             ? `<p><strong>Ronda abierta · ${escapeHtml(round.stage)}</strong><br>Objetivo ${escapeHtml(money(round.target_usd))} · Ticket ${escapeHtml(money(round.ticket_min_usd))}–${escapeHtml(money(round.ticket_max_usd))}${round.committed_pct ? ` · ${round.committed_pct}% comprometido` : ""}</p>`
             : "<p>Esta startup no está buscando financiamiento por ahora.</p>") +
+          followerSection +
           profileSection("Publicaciones", postCards(posts.data || [], startup.name))
       });
     }
@@ -1005,7 +1032,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       return profileShell({
         bannerUrl: company.banner_url, photoUrl: company.logo_url, initials: company.name.slice(0, 1).toUpperCase(),
         title: company.name, subtitle: `${company.city}, Chile · ${company.size} personas`,
-        tags: [sectorName(company.sector_id), ...(company.collaboration_types || []).map(collaborationName)],
+        tags: [sectorName(company.sector_id), ...((await isProUser(company.owner_id)) ? ["★ Pro"] : []), ...(company.collaboration_types || []).map(collaborationName)],
         actions: own ? '<button class="secondary-button" data-edit-own>Editar perfil</button><button class="secondary-button" data-upload="avatar">Cambiar logo</button><button class="secondary-button" data-upload="banner">Cambiar banner</button>' : "",
         body: profileSection("Acerca de", `<p>${escapeHtml(company.description)}</p>${site}`) +
           profileSection("Desafíos de innovación", (challenges.data || []).length
@@ -1064,12 +1091,29 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     notify("Perfil actualizado.");
   }
 
+  // Único camino para "Me interesa" (tarjeta, rondas y perfil). Devuelve true si el interés quedó enviado.
   async function sendInterestTo(startupId) {
+    const cap = interestLimit() ?? 10;
+    const limitMessage = `Llegaste al límite de ${cap} «Me interesa» de este mes. Con el plan Pro son ilimitados.`;
+    if (!hasFeature("unlimited_interests") && entitlements.interests_used_month >= cap) {
+      notify(limitMessage);
+      return false;
+    }
     const { error } = await supabaseClient.from("interests").insert({ investor_id: user.id, startup_id: startupId });
-    if (error?.code === "23505") return notify("Ya enviaste interés por esta startup.");
-    if (error) return reportFailure("No pudimos enviar tu interés", error);
-    notify(`Interés enviado a ${startups.find((item) => item.id === startupId)?.name || "la startup"}.`);
-    await loadInterests();
+    if (error?.code === "23505") {
+      notify("Ya enviaste interés por esta startup.");
+      return false;
+    }
+    if (error) {
+      if (/LIMIT_INTERESTS/.test(error.message)) { // la base manda: el contador de la pantalla estaba desactualizado
+        notify(limitMessage);
+        loadEntitlements().catch(() => {});
+      } else reportFailure("No pudimos enviar tu interés", error);
+      return false;
+    }
+    notify(`Interés enviado a ${startups.find((item) => item.id === startupId)?.name || "la startup"}. El equipo fundador podrá responderlo.`);
+    await Promise.all([loadInterests(), loadEntitlements()]);
+    return true;
   }
 
 
@@ -1328,6 +1372,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     if (item.type === "interest") return `${who} quiere conocer a ${startupName}`;
     if (item.type === "match") return `Match mutuo: ${startupName} aceptó tu interés`;
     if (item.type === "round_opened") return `${startupName} abrió una ronda de financiamiento`;
+    if (item.type === "billing") return "Tu pago está pendiente: actualiza tu medio de pago para conservar Pro.";
     return "Tienes una notificación nueva";
   }
 
@@ -1452,6 +1497,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   }
 
   async function openNotificationTarget(item) {
+    if (item.type === "billing") return openPlan();
     if (["match", "round_opened"].includes(item.type)) return openProfile("startup", item.entity_id);
     const { data: actor, error } = await supabaseClient.from("profiles").select("id, role").eq("id", item.actor_id).maybeSingle();
     if (error || !actor) return notify("No pudimos abrir ese perfil.");
@@ -1472,6 +1518,222 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     if (item) openNotificationTarget(item);
   }
 
+  // ------------------------------------------------------------------
+  // Planes y privilegios: la base de datos decide; la pantalla solo lo refleja
+  // ------------------------------------------------------------------
+  let entitlements = { effective_status: "free", is_pro: false, features: [], free_limits: {}, interests_used_month: 0, open_challenges: 0 };
+  let proOwners = new Set();
+  const advanced = { city: "", sector: "all", traction: 0, model: "all" };
+  const hasFeature = (feature) => Boolean(entitlements.is_pro && (entitlements.features || []).includes(feature));
+  const planDate = (value) => new Date(value).toLocaleDateString("es-CL", { day: "numeric", month: "short" });
+  const daysLeft = (value) => Math.max(0, Math.ceil((new Date(value) - Date.now()) / 86400000));
+  const interestLimit = () => Number(entitlements.free_limits?.interests_per_month) || null;
+  const challengeLimit = () => Number(entitlements.free_limits?.open_challenges) || null;
+  const PRO_TAG = '<span class="tag pro-tag">★ Pro</span>';
+
+  // [texto, función que lo desbloquea (null = incluido en Free)]
+  const PLAN_TABLE = {
+    startup: {
+      free: ["Perfil completo, banner, foto y video por enlace", "1 ronda abierta", "Número de seguidores", "Recibir intereses"],
+      pro: [["Ver quién te sigue", "follower_list"], ["Estadísticas de visitas", "profile_stats"], ["Aparecer destacada en Descubrir", "featured"], ["Subir video propio", "video_upload"], ["Insignia Pro", "pro_badge"]]
+    },
+    investor: {
+      free: ["10 «Me interesa» al mes", "Filtros por sector, etapa y ticket", "Seguir startups"],
+      pro: [["«Me interesa» ilimitados", "unlimited_interests"], ["Filtros avanzados (tracción, modelo, ciudad)", "advanced_filters"], ["Alertas de nuevas rondas", "round_alerts"], ["Ver quién más sigue una startup", "followers_of_startup"]]
+    },
+    company: {
+      free: ["1 desafío publicado", "10 «Me interesa» al mes", "Seguir startups"],
+      pro: [["Desafíos ilimitados", "unlimited_challenges"], ["«Me interesa» ilimitados", "unlimited_interests"], ["Búsqueda avanzada", "advanced_search"], ["Exportar listas", "export_lists"], ["Insignia Pro", "pro_badge"]]
+    }
+  };
+
+  async function loadEntitlements() {
+    const { data, error } = await supabaseClient.from("my_entitlements").select("*").maybeSingle();
+    if (error) throw error;
+    if (data) entitlements = data; // sin fila (p. ej. administrador) se mantiene Free
+    renderPlanCard();
+    renderInterestMeter();
+    renderAdvancedFilters();
+    renderProRail();
+    if ($("#view-plan").classList.contains("active")) renderPlanView();
+  }
+
+  function planSummary() {
+    const e = entitlements;
+    const free = profile.role === "startup"
+      ? "Perfil completo, 1 ronda abierta y seguidores."
+      : interestLimit() ? `${e.interests_used_month} de ${interestLimit()} «Me interesa» este mes.` : "Descubrimiento, perfiles y conexiones.";
+    if (e.effective_status === "trialing") {
+      const days = daysLeft(e.trial_ends_at);
+      return { tag: "PRUEBA PRO", title: `Prueba Pro · quedan ${days} ${days === 1 ? "día" : "días"}`, copy: "Tienes todos los privilegios Pro hasta que termine la prueba.", cta: "Elegir plan Pro" };
+    }
+    if (e.effective_status === "active") return { tag: "PLAN PRO", title: e.current_period_end ? `Pro · se renueva el ${planDate(e.current_period_end)}` : "Pro activo", copy: "Tienes todos los privilegios Pro.", cta: null };
+    if (e.effective_status === "past_due") return { tag: "PAGO PENDIENTE", title: "Pago pendiente · actualiza tu medio de pago", copy: `Conservas Pro hasta el ${planDate(e.grace_ends_at)}; después volverás a Free.`, cta: "Actualizar pago", alert: true };
+    if (e.effective_status === "canceled") return { tag: "PRO HASTA", title: `Pro hasta el ${planDate(e.current_period_end)} · no se renovará`, copy: "Después volverás al plan Free.", cta: "Reactivar Pro" };
+    if (e.effective_status === "expired") return { tag: "PLAN FREE", title: "Tu plan Pro venció", copy: "Volviste a Free: tus datos Pro se conservan, pero están bloqueados.", cta: "Volver a Pro" };
+    return { tag: "PLAN FREE", title: "Estás en el plan Free.", copy: free, cta: "Mejorar a Pro" };
+  }
+
+  function renderPlanCard() {
+    const summary = planSummary();
+    setText("#plan-tag", summary.tag);
+    setText("#plan-title", summary.title);
+    setText("#plan-copy", summary.copy);
+    $("#plan-card").classList.toggle("alert", Boolean(summary.alert));
+    const button = $("#plan-cta");
+    button.hidden = !summary.cta || !["startup", "investor", "company"].includes(profile.role);
+    if (summary.cta) button.textContent = summary.cta;
+    setText("#stat-plan", entitlements.is_pro ? "Pro" : "Free");
+    setText("#stat-plan-note", entitlements.is_pro ? summary.title : summary.copy);
+  }
+
+  function renderProRail() {
+    const copy = {
+      startup: ["Destaca tu startup", "Ve quién te sigue, mide tus visitas, aparece destacada y sube tu propio video."],
+      investor: ["Invierte sin tope", "«Me interesa» ilimitados, filtros avanzados y alertas de nuevas rondas."],
+      company: ["Colabora sin límites", "Desafíos ilimitados, búsqueda avanzada y exportación de listas."]
+    }[profile.role];
+    $("#pro-rail").hidden = !copy || entitlements.is_pro;
+    if (copy) {
+      setText("#pro-rail-title", copy[0]);
+      setText("#pro-rail-copy", copy[1]);
+    }
+  }
+
+  function renderInterestMeter() {
+    const meter = $("#interest-meter");
+    const applies = ["investor", "company"].includes(profile.role);
+    meter.hidden = !applies;
+    if (!applies) return;
+    const unlimited = hasFeature("unlimited_interests");
+    const cap = interestLimit() ?? 10;
+    meter.textContent = unlimited ? "Ilimitados · Pro" : `${entitlements.interests_used_month} de ${cap} este mes`;
+    meter.classList.toggle("limit", !unlimited && entitlements.interests_used_month >= cap);
+  }
+
+  function renderPlanView() {
+    const summary = planSummary();
+    const table = PLAN_TABLE[profile.role];
+    const meter = (label, used, cap) => `<div class="meter-row"><span>${label}</span><strong>${used} de ${cap}</strong><progress max="${cap}" value="${Math.min(used, cap)}"></progress></div>`;
+    let usage = "";
+    if (!entitlements.is_pro && ["investor", "company"].includes(profile.role)) usage += meter("«Me interesa» este mes", entitlements.interests_used_month, interestLimit() ?? 10);
+    if (!entitlements.is_pro && profile.role === "company") usage += meter("Desafíos abiertos", entitlements.open_challenges, challengeLimit() ?? 1);
+    $("#plan-status").innerHTML = `<div class="plan-status-card${summary.alert ? " alert" : ""}"><div><span class="pro-badge">${summary.tag}</span><h2>${escapeHtml(summary.title)}</h2><p>${escapeHtml(summary.copy)}</p></div>${summary.cta && table ? `<button class="primary-button" data-checkout>${summary.cta}</button>` : ""}</div>${usage}`;
+    $("#plan-compare").innerHTML = table
+      ? `<div class="plan-col"><h3>Free</h3><ul>${table.free.map((item) => `<li>✓ ${escapeHtml(item)}</li>`).join("")}</ul></div><div class="plan-col pro"><h3>Pro <span class="pro-badge">PRO</span></h3><ul>${table.pro.map(([label, key]) => `<li>${hasFeature(key) ? "✓" : "🔒"} ${escapeHtml(label)}</li>`).join("")}</ul></div>`
+      : "";
+  }
+
+  function openPlan() {
+    switchRemoteView("plan");
+    loadEntitlements().catch((error) => reportFailure("No pudimos actualizar tu plan", error));
+  }
+
+  // Sin pasarela configurada no se inventa un pago: se explica y los estados se cambian a mano en Supabase.
+  function startCheckout() {
+    if (config.checkoutUrl) return window.open(config.checkoutUrl, "_blank", "noopener");
+    notify("Los pagos aún no están habilitados. Escríbenos y activamos tu plan Pro manualmente.");
+  }
+
+  // Marca de "Pro" visible para todos (insignia y destacada). Para el propio usuario basta su suscripción.
+  async function isProUser(userId) {
+    if (userId === user.id) return entitlements.is_pro;
+    if (proOwners.has(userId)) return true;
+    const { data, error } = await supabaseClient.rpc("pro_user_ids", { p_ids: [userId] });
+    if (error) return false;
+    return (data || []).includes(userId);
+  }
+
+  function passesAdvanced(startup) {
+    const feature = profile.role === "investor" ? "advanced_filters" : "advanced_search";
+    if (!hasFeature(feature)) return true; // sin Pro, los filtros avanzados no se aplican
+    if (advanced.city && !startup.city.toLocaleLowerCase().includes(advanced.city.toLocaleLowerCase())) return false;
+    if (profile.role === "investor") {
+      if (Number(startup.traction_score) < advanced.traction) return false;
+      return advanced.model === "all" || startup.business_model === advanced.model;
+    }
+    return advanced.sector === "all" || startup.sector_id === advanced.sector;
+  }
+
+  function renderAdvancedFilters() {
+    const applies = ["investor", "company"].includes(profile.role);
+    $("#advanced-card").hidden = !applies;
+    if (!applies) return;
+    const investor = profile.role === "investor";
+    const unlocked = hasFeature(investor ? "advanced_filters" : "advanced_search");
+    $("#adv-sector").innerHTML = sectorOptions(advanced.sector, true);
+    $("#adv-sector-label").hidden = investor;
+    $("#adv-traction-label").hidden = !investor;
+    $("#adv-model-label").hidden = !investor;
+    $$("#advanced-fields input, #advanced-fields select").forEach((field) => { field.disabled = !unlocked; });
+    $("#advanced-lock").hidden = unlocked;
+  }
+
+  async function applyAdvancedFilters() {
+    Object.assign(advanced, { city: $("#adv-city").value.trim(), sector: $("#adv-sector").value, traction: Number($("#adv-traction").value), model: $("#adv-model").value });
+    selectedIndex = 0;
+    await loadStartups();
+    renderRemoteCard();
+    if (profile.role === "company" && companyProfile) renderCompanyRail();
+  }
+
+  async function loadVisitStats() {
+    if (!startupProfile) return;
+    const lock = () => {
+      setText("#views-30d", "🔒");
+      setText("#views-note", "Función Pro");
+    };
+    if (!hasFeature("profile_stats")) return lock();
+    const { data, error } = await supabaseClient.rpc("startup_view_stats", { p_startup_id: startupProfile.id });
+    if (/FEATURE_LOCKED/.test(error?.message || "")) return lock(); // la base manda: el plan cambió desde la última lectura
+    if (error) throw error;
+    const row = (Array.isArray(data) ? data[0] : data) || {};
+    setText("#views-30d", Number(row.views_30d || 0));
+    setText("#views-note", `${Number(row.views_7d || 0)} en los últimos 7 días`);
+  }
+
+  // Seguidores con nombre: la startup Pro ve a los suyos; el inversionista Pro, los de cualquier startup (la RLS lo decide).
+  async function followerListSection(startup, own) {
+    if (!own && profile.role !== "investor") return "";
+    const unlocked = own ? hasFeature("follower_list") : hasFeature("followers_of_startup");
+    if (!unlocked) return profileSection("Quién sigue", '<p class="locked-note">🔒 Ver los nombres de quienes siguen es una función del plan Pro. <button class="text-button" data-open-plan>Ver plan</button></p>');
+    const { data: follows, error } = await supabaseClient.from("follows").select("follower_id").eq("startup_id", startup.id);
+    if (error) throw error;
+    const ids = [...new Set((follows || []).map((row) => row.follower_id))];
+    if (!ids.length) return profileSection("Quién sigue", '<p class="field-hint">Aún no tiene seguidores.</p>');
+    const { data: people, error: peopleError } = await supabaseClient.from("profiles").select("id, full_name, role").in("id", ids);
+    if (peopleError) throw peopleError;
+    return profileSection("Quién sigue", `<div class="tag-row">${people.map((person) => `<span class="tag ${person.role === "company" ? "follower-company" : "follower-investor"}">${escapeHtml(person.full_name)} · ${escapeHtml(NOTIFICATION_ROLE[person.role] || "")}</span>`).join("")}</div>`);
+  }
+
+  // Video propio: solo se reproduce desde nuestro Storage y mientras el plan Pro de su dueño esté vigente.
+  const ownVideoUrl = (url) => typeof url === "string" && url.startsWith(`${config.supabaseUrl.replace(/\/$/, "")}/storage/v1/object/public/pitch-videos/`);
+
+  async function exportLists() {
+    if (!hasFeature("export_lists")) {
+      notify("Exportar listas es una función del plan Pro.");
+      return openPlan();
+    }
+    const [follows, interests] = await Promise.all([
+      supabaseClient.from("follows").select("startup_id").eq("follower_id", user.id),
+      supabaseClient.from("interests").select("startup_id, status").eq("investor_id", user.id)
+    ]);
+    const failed = firstError(follows, interests);
+    if (failed) return reportFailure("No pudimos exportar tus listas", failed);
+    const find = (id) => startups.find((startup) => startup.id === id);
+    const row = (type, id, state) => { const s = find(id); return s ? [type, s.name, sectorName(s.sector_id), s.city, state] : null; };
+    const rows = [["Lista", "Startup", "Sector", "Ciudad", "Estado"],
+      ...(follows.data || []).map((item) => row("Seguida", item.startup_id, "Siguiendo")),
+      ...(interests.data || []).map((item) => row("Interés", item.startup_id, { pending: "Pendiente", matched: "Match", rejected: "No aceptado" }[item.status] || item.status))
+    ].filter(Boolean);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob(["﻿", window.VentureaMedia.toCsv(rows)], { type: "text/csv;charset=utf-8" }));
+    link.download = "venturea-mis-listas.csv";
+    link.click();
+    URL.revokeObjectURL(link.href);
+    notify("Listas exportadas.");
+  }
+
   async function signOut() {
     const { error } = await supabaseClient.auth.signOut();
     if (error) reportFailure("No pudimos cerrar la sesión", error);
@@ -1487,7 +1749,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
 
   function switchRemoteView(name) {
     const target = $(`#view-${name}`);
-    if (!target || (name !== "profile" && !MENUS[profile.role].some(([view]) => view === name))) return;
+    if (!target || (!["profile", "plan"].includes(name) && !MENUS[profile.role].some(([view]) => view === name))) return;
     $$(".view").forEach((view) => view.classList.toggle("active", view === target));
     $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
     $("#breadcrumb-current").textContent = VIEW_TITLES[name];
@@ -1495,6 +1757,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     if (name === "updates") loadUpdates().catch((error) => reportFailure("No pudimos cargar las actualizaciones", error));
     if (name === "funds") renderRemoteFunds();
     if (name === "company") renderCompanyDashboard();
+    if (name === "plan") renderPlanView();
     if (name === "challenges") loadChallenges().catch((error) => reportFailure("No pudimos cargar tus desafíos", error));
     if (name === "following") loadFollowing().catch((error) => reportFailure("No pudimos cargar tus seguidos", error));
     if (name === "startup") renderStartupDashboard();
@@ -1503,19 +1766,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
 
   async function sendInterest() {
     const startup = rankedStartups[selectedIndex];
-    if (!startup) return;
-    const { error } = await supabaseClient.from("interests").insert({ investor_id: user.id, startup_id: startup.id });
-    if (error?.code === "23505") {
-      notify("Ya enviaste interés por esta startup.");
-      return;
-    }
-    if (error) {
-      reportFailure("No pudimos enviar tu interés", error);
-      return;
-    }
-    notify(`Interés enviado a ${startup.name}. El equipo fundador podrá responderlo.`);
-    await loadInterests();
-    nextStartup();
+    if (startup && await sendInterestTo(startup.id)) nextStartup();
   }
 
   function nextStartup() {
@@ -1591,6 +1842,10 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   function openStartupEditor() {
     fillStartupProfileForm();
     setError($("#startup-profile-error"), "");
+    const canUpload = hasFeature("video_upload");
+    $("#pitch-file").value = "";
+    $("#pitch-file").disabled = !canUpload;
+    setText("#pitch-file-hint", canUpload ? "MP4 o WebM, hasta 100 MB. Se muestra en tu perfil." : "MP4 o WebM, hasta 100 MB. Disponible en el plan Pro.");
     setModal($("#startup-profile-modal"), true);
   }
 
@@ -1627,6 +1882,15 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       return;
     }
     // owner_id y country solo se escriben al crear; traction_score e is_fundraising no son editables desde el navegador.
+    const videoFile = $("#pitch-file").files[0];
+    if (videoFile) {
+      const problem = hasFeature("video_upload") ? window.VentureaMedia.validateVideoFile(videoFile) : "Subir video propio es una función del plan Pro.";
+      if (problem) return setError($("#startup-profile-error"), problem);
+      const path = `${user.id}/pitch-${Date.now()}.${videoFile.type === "video/webm" ? "webm" : "mp4"}`; // la política exige la carpeta {user_id}/
+      const { error: uploadError } = await supabaseClient.storage.from("pitch-videos").upload(path, videoFile, { contentType: videoFile.type });
+      if (uploadError) return setError($("#startup-profile-error"), uploadError.message);
+      values.pitch_video_file_url = supabaseClient.storage.from("pitch-videos").getPublicUrl(path).data.publicUrl;
+    }
     const { owner_id, country, ...editable } = values;
     const query = startupProfile
       ? supabaseClient.from("startup_profiles").update(editable).eq("id", startupProfile.id)
@@ -1666,6 +1930,9 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   }
 
   async function handleRemoteClick(event) {
+    if (event.target.closest("[data-open-plan]")) return openPlan();
+    if (event.target.closest("[data-checkout]")) return startCheckout();
+    if (event.target.closest("[data-export-lists]")) return exportLists();
     const upload = event.target.closest("[data-upload]");
     if (upload) return openImageUploader(upload.dataset.upload);
     const follow = event.target.closest("[data-follow]");
@@ -1681,19 +1948,17 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     const challengeToggle = event.target.closest("[data-challenge-toggle]");
     if (challengeToggle) {
       const { error } = await supabaseClient.from("company_challenges").update({ status: challengeToggle.dataset.status }).eq("id", challengeToggle.dataset.challengeToggle);
-      if (error) return reportFailure("No pudimos actualizar el desafío", error);
+      if (error) {
+        if (/LIMIT_CHALLENGES/.test(error.message)) return notify("El plan Free permite un desafío abierto. Cierra el otro o pasa a Pro para reabrir este.");
+        return reportFailure("No pudimos actualizar el desafío", error);
+      }
       return loadChallenges();
     }
     const viewButton = event.target.closest("[data-open-view]");
     if (viewButton) switchRemoteView(viewButton.dataset.openView);
     const interestButton = event.target.closest("[data-fund-interest]");
     if (interestButton && ["investor", "company"].includes(profile.role)) {
-      const startup = startups.find((item) => item.id === interestButton.dataset.fundInterest);
-      const { error } = await supabaseClient.from("interests").insert({ investor_id: user.id, startup_id: interestButton.dataset.fundInterest });
-      if (error?.code === "23505") return notify("Ya enviaste interés por esta startup.");
-      if (error) return reportFailure("No pudimos enviar tu interés", error);
-      notify(`Interés enviado a ${startup?.name || "la startup"}.`);
-      await loadInterests();
+      return sendInterestTo(interestButton.dataset.fundInterest);
     }
     const responseButton = event.target.closest("[data-respond]");
     if (responseButton && profile.role === "startup") {

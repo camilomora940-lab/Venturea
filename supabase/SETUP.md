@@ -14,6 +14,7 @@ Venturea funciona sobre un proyecto de Supabase. Se recomiendan **dos proyectos*
    | `003_v2.sql` | Catálogo de 32 sectores, rol empresa, medios, rondas, categorías, seguidores, notificaciones y tablas de planes. Conserva los datos existentes y corre dentro de una transacción |
    | `004_profiles_storage.sql` | Buckets públicos `avatars` (2 MB) y `banners` (5 MB) con escritura solo en la carpeta del propio usuario; sectores visibles en perfiles públicos |
    | `005_community.sql` | `follower_counts()`, notificaciones automáticas (seguir, interés, match y ronda abierta) y publicación en Realtime |
+   | `006_freemium.sql` | `has_feature()`, vista `my_entitlements`, límites del plan Free (triggers), privilegios Pro en RLS, estadísticas de visitas, bucket `pitch-videos` y vencimiento diario (pg_cron) |
 
 3. En **Project Settings → API**, copia el **Project URL** y la clave **anon/publicable**. Nunca copies una `service_role` o clave secreta en el frontend.
 4. En **Authentication → URL Configuration**, agrega la URL local permitida `http://localhost:8000/**` y define `http://localhost:8000/` como Site URL.
@@ -85,14 +86,48 @@ Todas usan la contraseña de `SEED_PASSWORD`. El estado de pago se aplica desde 
 | c03–c06@venturea.test | Empresas (AgroNorte, Retail Cordillera, Energía del Sur, Clínica Alameda) | Free | `free` |
 | a01@venturea.test | Administrador | — | — |
 
+## Planes, pagos y privilegios (Fase 4)
+
+Venturea tiene plan **Free** y plan **Pro** por rol. Los precios y límites exactos de Pro están por definir (decisiones abiertas 1 y 2): `plans.price_clp` queda en `null` hasta decidirlos y los límites viven en `plans.limits`.
+
+**Quién decide.** El navegador solo *lee* su suscripción (`my_entitlements`). Ninguna política permite insertarla o modificarla: la escribe solo la Edge Function `payments-webhook` (clave `service_role`, solo en el servidor) o tú desde el panel de Supabase. Los privilegios se calculan en la base con `has_feature()` a partir del estado y las fechas; la pantalla solo los refleja.
+
+| Estado | ¿Tiene Pro? |
+| --- | --- |
+| `free` | No |
+| `trialing` | Sí, hasta `trial_ends_at` |
+| `active` | Sí |
+| `past_due` | Sí, durante 5 días de gracia desde `current_period_end` |
+| `canceled` | Sí, hasta `current_period_end` |
+| `expired` | No. Vuelve a Free; los datos Pro se conservan pero se bloquean |
+
+La función `expire_subscriptions()` pasa a `expired` lo vencido. Se programa sola todos los días a las 03:05 UTC **si la extensión `pg_cron` está activa** (Database → Extensions → `pg_cron`; después vuelve a ejecutar la última parte de `006_freemium.sql` o ejecuta `select cron.schedule('expire-subscriptions', '5 3 * * *', 'select public.expire_subscriptions()');`).
+
+**Probar estados a mano** (mientras no haya pasarela), en el SQL Editor del proyecto de pruebas:
+
+```sql
+update public.subscriptions
+   set plan_id = 'investor_pro', status = 'active', current_period_end = now() + interval '30 days'
+ where user_id = (select id from auth.users where email = 'i01@venturea.test');
+```
+
+**Webhook de pagos.** [`functions/payments-webhook`](./functions/payments-webhook) verifica la firma HMAC-SHA256 del cuerpo (cabecera `x-signature`), ignora eventos repetidos (`payment_events.id` es único) y actualiza `subscriptions`. El contrato es genérico; cuando se elija pasarela (Mercado Pago, Flow, Stripe...) solo hay que adaptar `parseEvent`.
+
+```powershell
+supabase secrets set PAYMENTS_WEBHOOK_SECRET=un-secreto-largo
+supabase functions deploy payments-webhook --no-verify-jwt
+```
+
+Para activar el botón de pago, define `checkoutUrl` en `supabase-config.js`; sin él, el botón explica que los pagos aún no están habilitados en lugar de simular un cobro.
+
 ## Pruebas automáticas
 
 ```powershell
 npm test
 ```
 
-Ejecuta, sin dependencias de ejecución: la interfaz en Edge/Chrome sin ventana contra un Supabase simulado (`tests/run.mjs`), los contrastes de color (`tests/contrast.mjs`) y las migraciones y el seed sobre un PostgreSQL real y embebido (`tests/db_test.py`, requiere `pip install pgserver psycopg2-binary pglast`).
+Ejecuta, sin dependencias de ejecución: las funciones puras (`tests/unit.mjs`), el webhook de pagos (`tests/webhook.test.mjs`), la interfaz en Edge/Chrome sin ventana contra un Supabase simulado (`tests/run.mjs`), los contrastes de color (`tests/contrast.mjs`) y las migraciones, el seed, los permisos y los 7 estados de pago sobre un PostgreSQL real y embebido (`tests/db_test.py`, requiere `pip install pgserver psycopg2-binary pglast`).
 
 ## Costos y límites
 
-Supabase Free tiene límites y puede pausar proyectos inactivos. Revisa las condiciones actuales antes de publicar: los proveedores pueden modificarlas.
+Supabase Free tiene límites y puede pausar proyectos inactivos; el almacenamiento (fotos, banners y videos Pro) cuenta contra la cuota del plan. Antes de cobrar, confirma las comisiones y el soporte de suscripciones de la pasarela elegida y revisa las condiciones vigentes de cada proveedor.

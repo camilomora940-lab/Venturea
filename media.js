@@ -44,6 +44,25 @@
     return "";
   }
 
+  // Video propio (plan Pro): MP4 o WebM, hasta 100 MB.
+  const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+  function validateVideoFile(file) {
+    if (!file) return "Selecciona un video.";
+    if (!["video/mp4", "video/webm"].includes(file.type)) return "Formato no permitido: usa un video MP4 o WebM.";
+    if (!file.size) return "El archivo está vacío.";
+    if (file.size > MAX_VIDEO_BYTES) return `El video pesa ${(file.size / 1048576).toFixed(0)} MB; el máximo es ${MAX_VIDEO_BYTES / 1048576} MB.`;
+    return "";
+  }
+
+  // CSV para exportar listas. Las celdas que empiezan con = + - @ se neutralizan para que Excel no las ejecute como fórmula.
+  function toCsv(rows) {
+    return rows.map((row) => row.map((cell) => {
+      let text = String(cell ?? "");
+      if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+      return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    }).join(",")).join("\r\n");
+  }
+
   // Rectángulo de la imagen original que llena la salida; zoom ≥ 1; pan en píxeles de la imagen original.
   function coverRect(imgW, imgH, outW, outH, zoom = 1, panX = 0, panY = 0) {
     const scale = Math.max(outW / imgW, outH / imgH) * Math.max(1, zoom);
@@ -53,5 +72,5 @@
     return { sx: clamp((imgW - sw) / 2 + panX, imgW - sw), sy: clamp((imgH - sh) / 2 + panY, imgH - sh), sw, sh };
   }
 
-  window.VentureaMedia = { IMAGE_TYPES, IMAGE_RULES, toEmbedUrl, validateImageFile, coverRect };
+  window.VentureaMedia = { IMAGE_TYPES, IMAGE_RULES, toEmbedUrl, validateImageFile, validateVideoFile, toCsv, coverRect };
 })();
