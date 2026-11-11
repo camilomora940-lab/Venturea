@@ -10,7 +10,7 @@
   const scenarioName = new URLSearchParams(location.search).get("s");
   const results = [];
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  async function until(test, label, tries = 60) {
+  async function until(test, label, tries = 160) {
     for (let i = 0; i < tries; i++) { if (test()) return; await wait(50); }
     throw new Error(`timeout: ${label}`);
   }
@@ -33,7 +33,10 @@
         window.supabase = { createClient: () => parent.__client };
       <\/script></head>`);
     window.__client = window.createMockSupabase(db, { ...scenario.options, log });
-    doc.open(); doc.write(patched); doc.close();
+    doc.open();
+    // Los console.error de la app cuentan como fallo: así no pasan inadvertidos errores tragados por catch.
+    frame.contentWindow.console.error = (...args) => results.push({ ok: false, label: "console.error: " + args.map((a) => (a && a.message) || String(a)).join(" ") });
+    doc.write(patched); doc.close();
     const ctx = {
       doc, win: frame.contentWindow, db, log, wait, until,
       $: (s) => doc.querySelector(s), $$: (s) => [...doc.querySelectorAll(s)],

@@ -181,7 +181,7 @@
           <button class="modal-close" id="close-preferences-modal" aria-label="Cerrar">×</button>
           <div class="modal-eyebrow">FILTROS OBLIGATORIOS DEL MATCHING</div><h2 id="preferences-title">Tu tesis de inversión<span class="heading-period">.</span></h2><p class="modal-copy">Estas preferencias determinan qué startups pasan el filtro inicial.</p>
           <form id="preferences-form">
-            <fieldset class="preference-fieldset"><legend>Sectores de interés</legend><div class="preference-options" id="sector-options"></div></fieldset>
+            <fieldset class="preference-fieldset"><legend>Sectores de interés</legend><input type="search" id="sector-search" placeholder="Buscar sector" aria-label="Buscar sector" autocomplete="off" /><div class="preference-options" id="sector-options"></div></fieldset>
             <fieldset class="preference-fieldset"><legend>Etapas</legend><div class="preference-options" id="stage-options"></div></fieldset>
             <div class="form-row"><label>Ticket mínimo (USD)<input required name="minTicket" type="number" min="1" /></label><label>Ticket máximo (USD)<input required name="maxTicket" type="number" min="1" /></label></div>
             <p class="form-disclaimer">El orden combina la compatibilidad de ambas partes; si el mínimo supera el máximo, no se guardarán los cambios.</p>

@@ -13,6 +13,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   let workspaceUserId = null;
   let workspaceController;
   let startups = [];
+  let sectors = [];
   let rankedStartups = [];
   let selectedIndex = 0;
   let authMode = "signup";
@@ -47,6 +48,14 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   };
   // Portada por sector sin banner: degradado cobalto→violeta, cobalto→esmeralda o marino→cobalto, estable por sector.
   const coverClass = (sector) => ["", "cover-emerald", "cover-navy"][[...String(sector)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 3];
+  const sectorName = (id) => sectors.find((sector) => sector.id === id)?.name ?? id;
+  // <option> agrupadas por rubro; solo sectores activos (los inactivos siguen teniendo nombre en sectorName).
+  const sectorOptions = (selected, withAll = false) => {
+    const groups = [...new Set(sectors.filter((sector) => sector.is_active).map((sector) => sector.group_name))];
+    return (withAll ? '<option value="all">Todos los sectores</option>' : "") + groups.map((group) =>
+      `<optgroup label="${escapeHtml(group)}">${sectors.filter((sector) => sector.is_active && sector.group_name === group).map((sector) =>
+        `<option value="${sector.id}"${sector.id === selected ? " selected" : ""}>${escapeHtml(sector.name)}</option>`).join("")}</optgroup>`).join("");
+  };
   const setText = (selector, value) => {
     const element = $(selector);
     if (element) element.textContent = String(value);
@@ -111,6 +120,14 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     return data;
   }
 
+  async function loadSectors() {
+    const { data, error } = await supabaseClient.from("sectors").select("id, name, group_name, is_active, sort_order").order("sort_order");
+    if (error) throw error;
+    sectors = data || [];
+    $("#fund-filter").innerHTML = sectorOptions("all", true);
+    $("#startup-profile-form").elements.sector.innerHTML = sectorOptions();
+  }
+
   async function loadInvestorPreferences() {
     const { data, error } = await supabaseClient
       .from("investor_preferences")
@@ -119,7 +136,10 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       .maybeSingle();
     if (error) throw error;
     if (!data) throw new Error("No se encontraron tus preferencias de inversión. Ejecuta el esquema SQL y vuelve a iniciar sesión.");
-    investorPreferences = data;
+    const { data: tagged, error: sectorsError } = await supabaseClient.from("profile_sectors").select("sector_id, kind").eq("profile_id", user.id);
+    if (sectorsError) throw sectorsError;
+    const ofKind = (kind) => (tagged || []).filter((row) => row.kind === kind).map((row) => row.sector_id);
+    investorPreferences = { ...data, sectors: ofKind("interest"), sector_expertise: ofKind("expertise") };
   }
 
   function updateAccountLabels() {
@@ -154,7 +174,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   }
 
   function assess(startup) {
-    const sectorFit = investorPreferences.sectors.includes(startup.sector) ? 1 : 0;
+    const sectorFit = investorPreferences.sectors.includes(startup.sector_id) ? 1 : 0;
     const stageFit = investorPreferences.stages.includes(startup.stage) ? 1 : 0;
     const checkFit = ticketFit(startup);
     const marketFit = investorPreferences.markets.includes(startup.country) ? 1 : 0;
@@ -167,7 +187,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     const startupScore = Math.round(100 * (
       (startup.desired_investor_types.includes(investorPreferences.investor_type) ? 0.25 : 0) +
       checkFit * 0.25 +
-      (investorPreferences.sector_expertise.includes(startup.sector) ? 0.25 : 0) +
+      (investorPreferences.sector_expertise.includes(startup.sector_id) ? 0.25 : 0) +
       (investorPreferences.markets.includes(startup.country) ? 0.15 : 0) +
       (startup.desired_stages.some((stage) => investorPreferences.stages.includes(stage)) ? 0.1 : 0)
     ));
@@ -179,7 +199,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   }
 
   function passesFilters(startup) {
-    return investorPreferences.sectors.includes(startup.sector) &&
+    return investorPreferences.sectors.includes(startup.sector_id) &&
       investorPreferences.stages.includes(startup.stage) &&
       ticketFit(startup) > 0 &&
       investorPreferences.markets.includes(startup.country) &&
@@ -191,9 +211,9 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     const sorted = candidates.sort((a, b) => b.assessment.combinedScore - a.assessment.combinedScore);
     const buckets = new Map();
     sorted.forEach((startup) => {
-      const bucket = buckets.get(startup.sector) || [];
+      const bucket = buckets.get(startup.sector_id) || [];
       bucket.push(startup);
-      buckets.set(startup.sector, bucket);
+      buckets.set(startup.sector_id, bucket);
     });
     const diversified = [];
     while (buckets.size) {
@@ -213,11 +233,15 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       .order("created_at", { ascending: false });
     if (error) throw error;
     startups = data || [];
-    const openRounds = startups.filter((startup) => startup.is_fundraising);
+    const { data: rounds, error: roundsError } = await supabaseClient.from("funding_rounds").select("*").eq("status", "open");
+    if (roundsError) throw roundsError;
+    const roundOf = new Map((rounds || []).map((round) => [round.startup_id, round]));
+    startups = startups.map((startup) => ({ ...startup, round: roundOf.get(startup.id) }));
+    const openRounds = startups.filter((startup) => startup.round);
     setText("#startup-count", startups.length);
     setText("#discover-count", startups.length);
     setText("#open-rounds-count", openRounds.length);
-    setText("#open-rounds-note", `En ${new Set(openRounds.map((startup) => startup.sector)).size} sectores`);
+    setText("#open-rounds-note", `En ${new Set(openRounds.map((startup) => startup.sector_id)).size} sectores`);
     const owners = [...new Set(startups.map((startup) => startup.owner_id))];
     if (owners.length) {
       const { data: ownerProfiles, error: ownersError } = await supabaseClient
@@ -246,7 +270,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     card.hidden = false;
     empty.hidden = true;
     $("#card-number").textContent = `${String(selectedIndex + 1).padStart(2, "0")} / ${String(rankedStartups.length).padStart(2, "0")}`;
-    $("#card-cover").className = `startup-cover ${coverClass(startup.sector)}`;
+    $("#card-cover").className = `startup-cover ${coverClass(startup.sector_id)}`;
     $("#company-logo").textContent = startup.name.slice(0, 1).toUpperCase();
     $("#company-name").textContent = startup.name;
     $("#company-location").textContent = `${startup.city}, Chile`;
@@ -256,14 +280,14 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     $("#company-fit").innerHTML = `${startup.assessment.combinedScore}% <span>✦</span>`;
     $("#score-breakdown").textContent = `Tu encaje ${startup.assessment.investorScore}% · Encaje con lo que busca la startup ${startup.assessment.startupScore}%`;
     $("#score-reasons").innerHTML = [
-      `Sector ${escapeHtml(startup.sector)}`,
+      `Sector ${escapeHtml(sectorName(startup.sector_id))}`,
       `Etapa ${escapeHtml(startup.stage)}`,
       `Ticket ${escapeHtml(money(investorPreferences.min_ticket_usd))}–${escapeHtml(money(investorPreferences.max_ticket_usd))}`,
       "Chile"
     ].map((reason) => `<span>${reason}</span>`).join("");
     $("#founder-name").textContent = startup.founder_name;
     $("#founder-avatar").textContent = startup.founder_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
-    $("#company-tags").innerHTML = [startup.sector, startup.business_model, startup.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
+    $("#company-tags").innerHTML = [sectorName(startup.sector_id), startup.business_model, startup.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
     $("#bookmark-button").hidden = true;
   }
 
@@ -282,7 +306,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     }
     const startupIds = [...new Set(interests.map((interest) => interest.startup_id))];
     const { data: linkedStartups, error: startupError } = await supabaseClient
-      .from("startup_profiles").select("id, name, city, sector, stage").in("id", startupIds);
+      .from("startup_profiles").select("id, name, city, sector_id, stage").in("id", startupIds);
     if (startupError) throw startupError;
     const lookup = new Map(linkedStartups.map((startup) => [startup.id, startup]));
     $("#match-list").innerHTML = interests.map((interest) => {
@@ -290,7 +314,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       if (!startup) return "";
       const matched = interest.status === "matched";
       const rejected = interest.status === "rejected";
-      return `<article class="match-item"><span class="match-logo">${escapeHtml(startup.name.slice(0, 1))}</span><div class="match-item-info"><strong>${escapeHtml(startup.name)}</strong><small>${matched ? "Match mutuo" : rejected ? "No aceptado" : "Interés enviado · Esperando respuesta"} · ${escapeHtml(startup.sector)} · ${escapeHtml(startup.city)}, Chile</small></div>${matched ? '<span class="interest-pending">Match mutuo</span>' : ""}</article>`;
+      return `<article class="match-item"><span class="match-logo">${escapeHtml(startup.name.slice(0, 1))}</span><div class="match-item-info"><strong>${escapeHtml(startup.name)}</strong><small>${matched ? "Match mutuo" : rejected ? "No aceptado" : "Interés enviado · Esperando respuesta"} · ${escapeHtml(sectorName(startup.sector_id))} · ${escapeHtml(startup.city)}, Chile</small></div>${matched ? '<span class="interest-pending">Match mutuo</span>' : ""}</article>`;
     }).join("");
   }
 
@@ -321,7 +345,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
 
   async function loadUpdates() {
     const { data, error } = await supabaseClient
-      .from("startup_updates").select("*").order("created_at", { ascending: false }).limit(50);
+      .from("posts").select("*").order("created_at", { ascending: false }).limit(50);
     if (error) throw error;
     const posts = data || [];
     if (!posts.length) {
@@ -329,13 +353,13 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       return;
     }
     const ids = [...new Set(posts.map((post) => post.startup_id))];
-    const { data: companies, error: companiesError } = await supabaseClient.from("startup_profiles").select("id, name, sector").in("id", ids);
+    const { data: companies, error: companiesError } = await supabaseClient.from("startup_profiles").select("id, name, sector_id").in("id", ids);
     if (companiesError) throw companiesError;
     const lookup = new Map(companies.map((company) => [company.id, company]));
     const renderedPosts = posts.map((post) => {
       const company = lookup.get(post.startup_id);
       if (!company) return "";
-      return `<article class="update-item"><span class="update-logo">${escapeHtml(company.name.slice(0, 1))}</span><div class="update-copy"><strong>${escapeHtml(company.name)} <span class="tag">${escapeHtml(company.sector)}</span></strong><small>${new Date(post.created_at).toLocaleString("es-CL")}</small><p>${escapeHtml(post.content)}</p></div></article>`;
+      return `<article class="update-item"><span class="update-logo">${escapeHtml(company.name.slice(0, 1))}</span><div class="update-copy"><strong>${escapeHtml(company.name)} <span class="tag">${escapeHtml(sectorName(company.sector_id))}</span></strong><small>${new Date(post.created_at).toLocaleString("es-CL")}</small><p>${escapeHtml(post.content)}</p></div></article>`;
     }).join("");
     $("#update-list").innerHTML = renderedPosts;
     if (profile.role === "startup" && startupProfile) {
@@ -346,16 +370,16 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   function renderRemoteFunds() {
     const sector = $("#fund-filter").value;
     const stage = $("#stage-filter").value;
-    const filtered = startups.filter((startup) => startup.is_fundraising && (sector === "all" || startup.sector === sector) && (stage === "all" || startup.stage === stage));
+    const filtered = startups.filter((startup) => startup.round && (sector === "all" || startup.sector_id === sector) && (stage === "all" || startup.round.stage === stage));
     $("#fund-opportunity-count").textContent = String(filtered.length);
-    $("#fund-grid").innerHTML = filtered.length ? filtered.map((startup) => `<article class="fund-card"><div class="fund-card-top"><span class="fund-card-logo">${escapeHtml(startup.name.slice(0, 1))}</span><span class="fund-stage">${escapeHtml(startup.stage)}</span></div><h3>${escapeHtml(startup.name)}</h3><span class="fund-sector">${escapeHtml(startup.sector)} · ${escapeHtml(startup.city)}, Chile</span><p>${escapeHtml(startup.description)}</p><div class="fund-progress-row"><span>Objetivo de ronda</span><strong>${escapeHtml(money(startup.target_amount_usd))}</strong></div><div class="fund-progress-row"><span>Ticket buscado</span><strong>${escapeHtml(money(startup.preferred_check_min_usd))}–${escapeHtml(money(startup.preferred_check_max_usd))}</strong></div><div class="fund-card-footer"><span>Ubicación declarada</span>${profile.role === "investor" ? `<button data-fund-interest="${startup.id}">Me interesa →</button>` : ""}</div></article>`).join("") : '<div class="no-results">Aún no hay rondas publicadas con estos filtros.</div>';
+    $("#fund-grid").innerHTML = filtered.length ? filtered.map((startup) => `<article class="fund-card"><div class="fund-card-top"><span class="fund-card-logo">${escapeHtml(startup.name.slice(0, 1))}</span><span class="fund-stage">${escapeHtml(startup.round.stage)}</span></div><h3>${escapeHtml(startup.name)}</h3><span class="fund-sector">${escapeHtml(sectorName(startup.sector_id))} · ${escapeHtml(startup.city)}, Chile</span><p>${escapeHtml(startup.description)}</p><div class="fund-progress-row"><span>Objetivo de ronda</span><strong>${escapeHtml(money(startup.round.target_usd))}</strong></div><div class="fund-progress-row"><span>Ticket buscado</span><strong>${escapeHtml(money(startup.round.ticket_min_usd))}–${escapeHtml(money(startup.round.ticket_max_usd))}</strong></div>${startup.round.committed_pct ? `<div class="fund-progress-row"><span>Capital comprometido</span><strong>${startup.round.committed_pct}%</strong></div>` : ""}<div class="fund-card-footer"><span>Ubicación declarada</span>${profile.role === "investor" ? `<button data-fund-interest="${startup.id}">Me interesa →</button>` : ""}</div></article>`).join("") : '<div class="no-results">Aún no hay rondas publicadas con estos filtros.</div>';
   }
 
   function fillStartupProfileForm() {
     const form = $("#startup-profile-form");
     if (!startupProfile) return;
     for (const [field, key] of Object.entries({
-      name: "name", city: "city", sector: "sector", stage: "stage", target: "target_amount_usd",
+      name: "name", city: "city", sector: "sector_id", stage: "stage", target: "target_amount_usd",
       checkMin: "preferred_check_min_usd", checkMax: "preferred_check_max_usd",
       description: "description", businessModel: "business_model", isFundraising: "is_fundraising"
     })) {
@@ -375,7 +399,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     $(".dashboard-company-logo").textContent = startupProfile.name.slice(0, 1).toUpperCase();
     $(".dashboard-company-info h2").textContent = startupProfile.name;
     $(".dashboard-company-info > p").textContent = `${startupProfile.description} · ${startupProfile.city}, Chile`;
-    $(".dashboard-company-info .tag-row").innerHTML = [startupProfile.sector, startupProfile.business_model, startupProfile.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
+    $(".dashboard-company-info .tag-row").innerHTML = [sectorName(startupProfile.sector_id), startupProfile.business_model, startupProfile.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
     $("#round-status").textContent = startupProfile.is_fundraising ? "Ronda abierta" : "Perfil publicado";
     $("#startup-profile-form").elements.name.value = startupProfile.name;
     $("#startup-profile-form").elements.city.value = startupProfile.city;
@@ -391,6 +415,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     const { signal } = workspaceController;
     try {
     profile = await loadProfile(user);
+    await loadSectors();
     startupProfile = null;
     updateAccountLabels();
     setRoleNavigation();
@@ -415,7 +440,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       await loadInvestorPreferences();
       await loadStartups();
       renderRemoteCard();
-      $("#investor-sector-pills").innerHTML = investorPreferences.sectors.map((sector) => `<span>${escapeHtml(sector)}</span>`).join("") || "<span>Sin sectores</span>";
+      $("#investor-sector-pills").innerHTML = investorPreferences.sectors.map((sector) => `<span>${escapeHtml(sectorName(sector))}</span>`).join("") || "<span>Sin sectores</span>";
       $("#investor-stage-value").textContent = investorPreferences.stages.join(" · ") || "Sin etapas";
       $("#investor-ticket-value").textContent = `${money(investorPreferences.min_ticket_usd)} – ${money(investorPreferences.max_ticket_usd)}`;
       await loadInterests();
@@ -424,6 +449,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       $("#edit-filters").addEventListener("click", openPreferences, { signal });
       $("#empty-edit-filters").addEventListener("click", openPreferences, { signal });
       $("#preferences-form").addEventListener("submit", savePreferences, { signal });
+      $("#sector-search").addEventListener("input", filterSectorChecklist, { signal });
       $("#like-button").addEventListener("click", sendInterest, { signal });
       $("#pass-button").addEventListener("click", nextStartup, { signal });
       $("#bookmark-button").hidden = true;
@@ -586,10 +612,24 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     renderRemoteCard();
   }
 
+  // Casillas agrupadas por rubro, tomadas del catálogo (agregar un sector en la tabla lo hace aparecer aquí).
+  function sectorChecklist(selected) {
+    const active = sectors.filter((sector) => sector.is_active);
+    return [...new Set(active.map((sector) => sector.group_name))].map((group) =>
+      `<div class="preference-group"><div class="preference-group-title">${escapeHtml(group)}</div><div class="preference-chips">${active.filter((sector) => sector.group_name === group).map((sector) =>
+        `<label class="preference-option"><input type="checkbox" name="sector" value="${sector.id}" ${selected.includes(sector.id) ? "checked" : ""}>${escapeHtml(sector.name)}</label>`).join("")}</div></div>`).join("");
+  }
+
+  function filterSectorChecklist() {
+    const query = $("#sector-search").value.trim().toLocaleLowerCase();
+    $$("#sector-options .preference-option").forEach((option) => { option.hidden = !option.textContent.toLocaleLowerCase().includes(query); });
+    $$("#sector-options .preference-group").forEach((group) => { group.hidden = !$$(".preference-option:not([hidden])", group).length; });
+  }
+
   function openPreferences() {
-    const sectors = ["Healthtech", "Climate tech", "Fintech", "SaaS", "Inteligencia artificial"];
     const stages = ["Pre-seed", "Seed", "Serie A"];
-    $("#sector-options").innerHTML = sectors.map((sector) => `<label class="preference-option"><input type="checkbox" name="sector" value="${sector}" ${investorPreferences.sectors.includes(sector) ? "checked" : ""}>${sector}</label>`).join("");
+    $("#sector-search").value = "";
+    $("#sector-options").innerHTML = sectorChecklist(investorPreferences.sectors);
     $("#stage-options").innerHTML = stages.map((stage) => `<label class="preference-option"><input type="checkbox" name="stage" value="${stage}" ${investorPreferences.stages.includes(stage) ? "checked" : ""}>${stage}</label>`).join("");
     $("#preferences-form").elements.minTicket.value = investorPreferences.min_ticket_usd;
     $("#preferences-form").elements.maxTicket.value = investorPreferences.max_ticket_usd;
@@ -607,22 +647,29 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       notify("Selecciona al menos un sector y una etapa, y revisa el rango del ticket.");
       return;
     }
-    const updated = {
-      sectors,
-      stages,
-      min_ticket_usd: minTicket,
-      max_ticket_usd: maxTicket
-    };
-    const { data, error } = await supabaseClient.from("investor_preferences").update(updated).eq("user_id", user.id).select().single();
+    // Primero se agregan y después se quitan sectores: si algo falla, no se pierde la tesis anterior.
+    const added = sectors.filter((sector) => !investorPreferences.sectors.includes(sector));
+    const removed = investorPreferences.sectors.filter((sector) => !sectors.includes(sector));
+    if (added.length) {
+      const { error } = await supabaseClient.from("profile_sectors").insert(added.map((sector_id) => ({ profile_id: user.id, sector_id, kind: "interest" })));
+      if (error) return reportFailure("No pudimos guardar tus sectores", error);
+      investorPreferences.sectors = [...investorPreferences.sectors, ...added];
+    }
+    if (removed.length) {
+      const { error } = await supabaseClient.from("profile_sectors").delete().eq("profile_id", user.id).eq("kind", "interest").in("sector_id", removed);
+      if (error) return reportFailure("No pudimos guardar tus sectores", error);
+    }
+    const { data, error } = await supabaseClient.from("investor_preferences")
+      .update({ stages, min_ticket_usd: minTicket, max_ticket_usd: maxTicket }).eq("user_id", user.id).select().single();
     if (error) {
       reportFailure("No pudimos guardar tu tesis", error);
       return;
     }
-    investorPreferences = data;
+    investorPreferences = { ...data, sectors, sector_expertise: investorPreferences.sector_expertise };
     selectedIndex = 0;
     await loadStartups();
     renderRemoteCard();
-    $("#investor-sector-pills").innerHTML = sectors.map((sector) => `<span>${escapeHtml(sector)}</span>`).join("");
+    $("#investor-sector-pills").innerHTML = sectors.map((sector) => `<span>${escapeHtml(sectorName(sector))}</span>`).join("");
     $("#investor-stage-value").textContent = stages.join(" · ");
     $("#investor-ticket-value").textContent = `${money(minTicket)} – ${money(maxTicket)}`;
     setModal($("#preferences-modal"), false);
@@ -635,6 +682,24 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     setModal($("#startup-profile-modal"), true);
   }
 
+  // Marca de "busco financiamiento" del formulario de perfil -> filas de funding_rounds (el trigger actualiza is_fundraising).
+  async function syncOpenRound(saved, wantsOpen, values) {
+    const { data: open, error } = await supabaseClient.from("funding_rounds").select("id").eq("startup_id", saved.id).eq("status", "open").maybeSingle();
+    if (error) throw error;
+    if (wantsOpen === Boolean(open)) return saved;
+    const write = wantsOpen
+      ? supabaseClient.from("funding_rounds").insert({
+        startup_id: saved.id, status: "open", stage: values.stage, target_usd: values.target_amount_usd,
+        ticket_min_usd: values.preferred_check_min_usd, ticket_max_usd: values.preferred_check_max_usd, opens_at: new Date().toISOString()
+      })
+      : supabaseClient.from("funding_rounds").update({ status: "paused", updated_at: new Date().toISOString() }).eq("id", open.id);
+    const { error: writeError } = await write;
+    if (writeError) throw writeError;
+    const { data: fresh, error: freshError } = await supabaseClient.from("startup_profiles").select("*").eq("id", saved.id).single();
+    if (freshError) throw freshError;
+    return fresh;
+  }
+
   async function saveStartupProfile(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -643,17 +708,15 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       name: form.elements.name.value.trim(),
       city: form.elements.city.value.trim(),
       country: "Chile",
-      sector: form.elements.sector.value,
+      sector_id: form.elements.sector.value,
       description: form.elements.description.value.trim(),
       stage: form.elements.stage.value,
       target_amount_usd: Number(form.elements.target.value),
       preferred_check_min_usd: Number(form.elements.checkMin.value),
       preferred_check_max_usd: Number(form.elements.checkMax.value),
       business_model: form.elements.businessModel.value,
-      traction_score: startupProfile?.traction_score ?? 0,
       desired_investor_types: startupProfile?.desired_investor_types || ["Angel", "VC"],
       desired_stages: startupProfile?.desired_stages || [form.elements.stage.value],
-      is_fundraising: form.elements.isFundraising.checked,
       is_published: true
     };
     if (values.description.length < 20 || values.description.length > 1000) {
@@ -664,8 +727,10 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       setError($("#startup-profile-error"), "El ticket máximo debe ser igual o mayor que el mínimo.");
       return;
     }
+    // owner_id y country solo se escriben al crear; traction_score e is_fundraising no son editables desde el navegador.
+    const { owner_id, country, ...editable } = values;
     const query = startupProfile
-      ? supabaseClient.from("startup_profiles").update(values).eq("id", startupProfile.id)
+      ? supabaseClient.from("startup_profiles").update(editable).eq("id", startupProfile.id)
       : supabaseClient.from("startup_profiles").insert(values);
     const { data, error } = await query.select().single();
     if (error) {
@@ -673,7 +738,13 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       console.error("No pudimos guardar el perfil de startup:", error);
       return;
     }
-    startupProfile = data;
+    try {
+      startupProfile = await syncOpenRound(data, form.elements.isFundraising.checked, values);
+    } catch (roundError) {
+      startupProfile = data;
+      setError($("#startup-profile-error"), `Perfil guardado, pero no pudimos actualizar la ronda: ${roundError.message}`);
+      return;
+    }
     setModal($("#startup-profile-modal"), false);
     renderStartupDashboard();
     await loadStartups();
@@ -685,7 +756,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     const input = $("#update-input");
     const content = input.value.trim();
     if (!content) return notify("Escribe una actualización antes de publicarla.");
-    const { error } = await supabaseClient.from("startup_updates").insert({
+    const { error } = await supabaseClient.from("posts").insert({
       startup_id: startupProfile.id,
       author_id: user.id,
       content
