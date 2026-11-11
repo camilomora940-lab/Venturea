@@ -37,10 +37,15 @@ const names = Object.keys(SCENARIOS).filter((name) => !wanted.length || wanted.s
 let failures = 0;
 for (const name of names) {
   const dir = join(process.env.TEMP || "/tmp", `venturea-test-${name}`);
-  const html = await new Promise((resolve) => execFile(browser, [
-    "--headless=new", "--disable-gpu", `--user-data-dir=${dir}`, "--window-size=1280,900", "--virtual-time-budget=40000",
-    "--dump-dom", `http://127.0.0.1:${port}/tests/harness.html?s=${name}`
-  ], { maxBuffer: 1e8 }, (_e, out) => resolve(out)));
+  // El navegador sin ventana a veces tarda en cargar los scripts; se reintenta una vez antes de dar el escenario por fallido.
+  let html = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    html = await new Promise((resolve) => execFile(browser, [
+      "--headless=new", "--disable-gpu", `--user-data-dir=${dir}`, "--window-size=1280,900", "--virtual-time-budget=40000",
+      "--dump-dom", `http://127.0.0.1:${port}/tests/harness.html?s=${name}`
+    ], { maxBuffer: 1e8 }, (_e, out) => resolve(out)));
+    if (/RESULT:/.test(html || "") && !/timeout: carga de scripts/.test(html)) break;
+  }
   if (process.env.SHOT) await new Promise((resolve) => execFile(browser, ["--headless=new", "--disable-gpu", `--user-data-dir=${dir}s`, "--window-size=1320,1000", "--virtual-time-budget=40000", `--screenshot=${join(process.env.SHOT, name + ".png")}`, `http://127.0.0.1:${port}/tests/harness.html?s=${name}`], resolve));
   const match = /RESULT:(.*?):END/s.exec(html || "");
   if (!match) { console.log(`✗ ${name}: sin resultado`); failures++; continue; }

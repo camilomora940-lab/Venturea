@@ -9,8 +9,11 @@
   const frame = document.querySelector("#app");
   const scenarioName = new URLSearchParams(location.search).get("s");
   const results = [];
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  async function until(test, label, tries = 160) {
+  // Con --virtual-time-budget el reloj virtual corre más rápido que el trabajo asíncrono real (decodificar o codificar imágenes).
+  // Una petición real al servidor local pausa el tiempo virtual y deja avanzar ese trabajo.
+  const realTick = () => fetch("/tests/ping", { cache: "no-store" }).catch(() => {});
+  const wait = async (ms) => { await new Promise((resolve) => setTimeout(resolve, ms)); await realTick(); };
+  async function until(test, label, tries = 300) {
     for (let i = 0; i < tries; i++) { if (test()) return; await wait(50); }
     throw new Error(`timeout: ${label}`);
   }
@@ -25,6 +28,7 @@
     const html = await (await fetch("../index.html")).text();
     const patched = html
       .replace(/<script src="https:\/\/cdn[^"]*"><\/script>/, "")
+      .replace(/<link[^>]*https:\/\/[^>]*>/g, "") // sin red externa (fuentes): las pruebas no dependen de internet
       .replace(/<script src="supabase-config.js"><\/script>/, "")
       .replaceAll(/src="(?!http)([^"]+\.js)"/g, 'src="../$1"')
       .replace('href="styles.css"', 'href="../styles.css"')
@@ -36,6 +40,8 @@
     doc.open();
     // Los console.error de la app cuentan como fallo: así no pasan inadvertidos errores tragados por catch.
     frame.contentWindow.console.error = (...args) => results.push({ ok: false, label: "console.error: " + args.map((a) => (a && a.message) || String(a)).join(" ") });
+    frame.contentWindow.addEventListener("error", (e) => results.push({ ok: false, label: "error: " + e.message }));
+    frame.contentWindow.addEventListener("unhandledrejection", (e) => results.push({ ok: false, label: "rechazo sin manejar: " + ((e.reason && e.reason.message) || e.reason) }));
     doc.write(patched); doc.close();
     const ctx = {
       doc, win: frame.contentWindow, db, log, wait, until,
@@ -43,9 +49,14 @@
       ok(cond, label) { results.push({ ok: !!cond, label }); },
       visible(el) { return !!el && !el.hidden && el.getClientRects().length > 0; }
     };
+    await until(() => doc.readyState === "complete" && typeof frame.contentWindow.initializeSupabaseApp === "function", "carga de scripts", 400);
     await scenario.run(ctx);
   }
-  main().catch((e) => results.push({ ok: false, label: `EXCEPCIÓN: ${e.message}` })).finally(() => {
+  main().catch((e) => {
+    const d = frame.contentDocument;
+    const read = (s) => (d.querySelector(s) || {}).textContent || "";
+    results.push({ ok: false, label: `EXCEPCIÓN: ${e.message} [aviso: ${read("#toast")} | acceso: ${read("#auth-error")} | error imagen: ${read("#image-error")}]` });
+  }).finally(() => {
     document.querySelector("#out").textContent = "RESULT:" + JSON.stringify(results) + ":END";
   });
 </script>

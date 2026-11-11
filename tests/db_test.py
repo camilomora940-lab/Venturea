@@ -66,6 +66,16 @@ def bootstrap(db):
       alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
       alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
       grant usage on schema public to anon, authenticated, service_role;
+      -- Mínimo del esquema storage de Supabase.
+      create schema if not exists storage;
+      create table if not exists storage.buckets (id text primary key, name text, public boolean default false, file_size_limit bigint, allowed_mime_types text[]);
+      create table if not exists storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text, owner uuid);
+      alter table storage.objects enable row level security;
+      create or replace function storage.foldername(name text) returns text[] language sql immutable
+        as $f$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $f$;
+      grant usage on schema storage to anon, authenticated, service_role;
+      grant select, insert, update, delete on storage.objects to anon, authenticated, service_role;
+      grant select on storage.buckets to anon, authenticated, service_role;
     """)
 
 
@@ -117,6 +127,8 @@ def run_all(db):
     check(db.one("select category from posts limit 1") == "hito", "publicaciones existentes renombradas a posts con categoría 'hito'")
     check(db.one("select count(*) from subscriptions where status = 'free'") == 2, "todos los usuarios existentes quedan en plan Free")
     check(db.one("select count(*) from information_schema.columns where table_name = 'investor_preferences' and column_name in ('sectors','sector_expertise')") == 0, "investor_preferences ya no duplica sectores")
+
+    db.migrate(only=["004"])
 
     print("Alta de usuarios")
     adm = signup(db, "adm@x.cl", "admin", "Quiere Admin")
@@ -178,6 +190,29 @@ def run_all(db):
     check(status == "ok", "un enlace de YouTube se acepta")
     status, _ = db.as_user(own, "update startup_profiles set logo_url = 'javascript:alert(1)' where owner_id = %s", (own,))
     check(status == "error", "las URLs de imagen deben ser https")
+
+    print("Fotos y banners (Storage)")
+    check(db.one("select file_size_limit from storage.buckets where id = 'avatars'") == 2 * 1024 * 1024, "bucket avatars limitado a 2 MB")
+    check(db.one("select file_size_limit from storage.buckets where id = 'banners'") == 5 * 1024 * 1024, "bucket banners limitado a 5 MB")
+    check(db.one("select allowed_mime_types from storage.buckets where id = 'avatars'") == ["image/jpeg", "image/png", "image/webp"], "solo JPG, PNG o WebP")
+    status, _ = db.as_user(own, "insert into storage.objects (bucket_id, name) values ('avatars', %s)", (f"{own}/avatar.webp",))
+    check(status == "ok", "un usuario sube a su propia carpeta")
+    status, _ = db.as_user(own, "insert into storage.objects (bucket_id, name) values ('avatars', %s)", (f"{inv}/avatar.webp",))
+    check(status == "error", "nadie sube a la carpeta de otro usuario")
+    status, _ = db.as_user(own, "insert into storage.objects (bucket_id, name) values ('avatars', 'suelto.webp')")
+    check(status == "error", "no se sube fuera de una carpeta de usuario")
+    status, _ = db.as_user(own, "insert into storage.objects (bucket_id, name) values ('documentos', %s)", (f"{own}/x.pdf",))
+    check(status == "error", "solo existen escritura en avatars y banners")
+    status, _ = db.as_user(inv, "delete from storage.objects where name = %s", (f"{own}/avatar.webp",))
+    check(status == "ok" and db.one("select count(*) from storage.objects") == 1, "nadie borra archivos ajenos")
+    db.run("reset role")
+    db.run("set role anon")
+    check(db.one("select count(*) from storage.objects where bucket_id = 'avatars'") == 1, "las fotos son de lectura pública")
+    db.run("reset role")
+    status, rows = db.as_user(own, "select sector_id from profile_sectors where profile_id = %s", (inv,))
+    check(status == "ok" and len(rows) == 6, "los sectores de un inversor son visibles en su perfil público")
+    status, _ = db.as_user(own, "insert into profile_sectors (profile_id, sector_id, kind) values (%s, 'fintech', 'interest')", (inv,))
+    check(status == "error", "nadie edita los sectores de otro")
 
     print("Seguidores e intereses")
     status, _ = db.as_user(inv, "insert into follows (follower_id, startup_id) values (%s, %s)", (inv, sid))

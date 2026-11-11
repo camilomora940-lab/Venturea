@@ -4,6 +4,8 @@ window.createMockSupabase = function createMockSupabase(db, options = {}) {
   const { userId, rpc = {}, log = [] } = options;
   const clone = (value) => JSON.parse(JSON.stringify(value));
   let ids = 1000;
+  // Valores por defecto de la base (las columnas con DEFAULT en las migraciones).
+  const DEFAULTS = { company_challenges: { status: "open" }, funding_rounds: { status: "draft", committed_pct: 0 }, posts: { category: "hito" }, interests: { status: "pending" } };
   function builder(table) {
     const state = { filters: [], op: "select", payload: null, order: null, max: null, single: null, returning: false };
     const api = {};
@@ -31,7 +33,7 @@ window.createMockSupabase = function createMockSupabase(db, options = {}) {
       const rows = (db[table] ||= []);
       let result;
       if (state.op === "insert") {
-        const incoming = [].concat(state.payload).map((row) => ({ id: `id-${ids++}`, created_at: new Date().toISOString(), ...clone(row) }));
+        const incoming = [].concat(state.payload).map((row) => ({ id: `id-${ids++}`, created_at: new Date().toISOString(), ...DEFAULTS[table], ...clone(row) }));
         const unique = options.unique?.[table];
         if (unique && incoming.some((row) => rows.some((other) => unique.every((key) => other[key] === row[key])))) {
           return { data: null, error: { code: "23505", message: "duplicate key" } };

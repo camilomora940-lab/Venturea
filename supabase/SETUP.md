@@ -12,6 +12,7 @@ Venturea funciona sobre un proyecto de Supabase. Se recomiendan **dos proyectos*
    | `001_init.sql` | Perfiles, preferencias, startups, publicaciones, intereses y RLS (versión original) |
    | `002_search.sql` | Búsqueda global `search_all(q)` |
    | `003_v2.sql` | Catálogo de 32 sectores, rol empresa, medios, rondas, categorías, seguidores, notificaciones y tablas de planes. Conserva los datos existentes y corre dentro de una transacción |
+   | `004_profiles_storage.sql` | Buckets públicos `avatars` (2 MB) y `banners` (5 MB) con escritura solo en la carpeta del propio usuario; sectores visibles en perfiles públicos |
 
 3. En **Project Settings → API**, copia el **Project URL** y la clave **anon/publicable**. Nunca copies una `service_role` o clave secreta en el frontend.
 4. En **Authentication → URL Configuration**, agrega la URL local permitida `http://localhost:8000/**` y define `http://localhost:8000/` como Site URL.

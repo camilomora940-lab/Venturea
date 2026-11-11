@@ -21,7 +21,7 @@
           <label id="auth-name-label">Nombre completo<input name="fullName" autocomplete="name" required /></label>
           <label>Correo electrónico<input name="email" type="email" autocomplete="email" required /></label>
           <label>Contraseña<input name="password" type="password" minlength="8" autocomplete="new-password" required /></label>
-          <label id="auth-role-label">Quiero participar como<select name="role"><option value="investor">Inversor/a</option><option value="startup">Startup chilena</option></select></label>
+          <label id="auth-role-label">Quiero participar como<select name="role"><option value="investor">Inversor/a</option><option value="startup">Startup chilena</option><option value="company">Empresa / Corporativo</option></select></label>
           <label class="auth-consent" id="auth-consent-label"><input name="consent" type="checkbox" required />Acepto usar mi correo para la cuenta y entiendo que el perfil publicado será visible a miembros autenticados.</label>
           <p class="auth-error" id="auth-error" role="alert" hidden></p>
           <button class="primary-button auth-submit" type="submit" id="auth-submit">Crear cuenta gratis</button>
@@ -116,15 +116,15 @@
                   <p class="company-description" id="company-description">Diagnóstico preventivo con IA que detecta señales tempranas de enfermedades a partir de análisis de sangre de rutina.</p>
                   <div class="tag-row" id="company-tags"></div>
                   <div class="company-metrics"><div><small>RONDA ACTUAL</small><strong id="company-round">Seed · USD 1.2M</strong></div><div><small>TRACCIÓN</small><strong id="company-traction">3.4x crecimiento</strong></div><div class="match-score"><small>COMPATIBILIDAD</small><strong id="company-fit">00% <span>✦</span></strong></div></div>
-                  <div class="score-explanation"><div id="score-breakdown"></div><div class="score-reasons" id="score-reasons"></div><small>Tu puntaje pondera sector (25%), etapa (20%), ticket (20%), mercado (15%), modelo (10%) y tracción (10%). La compatibilidad combina ambos puntajes; no predice inversión.</small></div>
-                  <div class="card-footer"><div class="founder"><span class="avatar founder-avatar" id="founder-avatar">CL</span><span><small>FUNDADORA</small><strong id="founder-name">Camila López</strong></span></div><div class="card-actions"><button class="pass-button" id="pass-button" aria-label="Pasar startup">×</button><button class="info-button" id="info-button">Ver perfil <span>↗</span></button><button class="like-button" id="like-button" aria-label="Me interesa">♡</button></div></div>
+                  <div class="score-explanation"><div id="score-breakdown"></div><div class="score-reasons" id="score-reasons"></div><small id="score-note">Tu puntaje pondera sector (25%), etapa (20%), ticket (20%), mercado (15%), modelo (10%) y tracción (10%). La compatibilidad combina ambos puntajes; no predice inversión.</small></div>
+                  <div class="card-footer"><div class="founder"><span class="avatar founder-avatar" id="founder-avatar">CL</span><span><small>FUNDADORA</small><strong id="founder-name">Camila López</strong></span></div><div class="card-actions"><button class="pass-button" id="pass-button" aria-label="Pasar startup">×</button><button class="pitch-button" id="pitch-button" hidden>▶ Ver pitch</button><button class="info-button" id="info-button">Ver perfil <span>↗</span></button><button class="like-button" id="like-button" aria-label="Me interesa">♡</button></div></div>
                 </div>
               </div>
-              <div class="empty-state no-compatible-card" id="no-compatible-startups" hidden><span>⌕</span><h3>No hay startups que cumplan tu tesis</h3><p>Amplía tus sectores, etapas o rango de inversión para ver más opciones.</p><button class="secondary-button" id="empty-edit-filters">Editar filtros</button></div>
+              <div class="empty-state no-compatible-card" id="no-compatible-startups" hidden><span>⌕</span><h3 id="empty-title">No hay startups que cumplan tu tesis</h3><p id="empty-copy">Amplía tus sectores, etapas o rango de inversión para ver más opciones.</p><button class="secondary-button" id="empty-edit-filters">Editar filtros</button></div>
               </div>
               <aside class="right-rail">
                 <div class="rail-card matching-card"><div class="rail-card-heading"><span class="rail-icon">⌘</span><span class="rail-menu">···</span></div><span class="rail-kicker">TU MATCH IDEAL</span><h3>La próxima gran idea puede estar a un swipe.</h3><p>Explora proyectos alineados con tus tesis de inversión y conecta directamente con sus fundadores.</p><div class="match-avatars"><span class="mini-avatar mini-one">N</span><span class="mini-avatar mini-two">L</span><span class="mini-avatar mini-three">+</span><span class="match-caption">Matching gratuito para todos</span></div></div>
-                <div class="rail-card filters-card"><div class="filter-heading"><h3>Tu tesis de inversión</h3><button class="edit-button" id="edit-filters">Editar</button></div><div class="filter-group"><span>SECTORES</span><div class="filter-pills" id="investor-sector-pills"></div></div><div class="filter-group"><span>ETAPAS</span><div class="filter-value" id="investor-stage-value"></div></div><div class="filter-group"><span>TICKET</span><div class="filter-value" id="investor-ticket-value"></div></div><div class="filter-hint"><span>✦</span><span id="investor-compatible-count">Calculando compatibilidad...</span></div></div>
+                <div class="rail-card filters-card"><div class="filter-heading"><h3 id="rail-title">Tu tesis de inversión</h3><button class="edit-button" id="edit-filters">Editar</button></div><div class="filter-group"><span id="rail-label-1">SECTORES</span><div class="filter-pills" id="investor-sector-pills"></div></div><div class="filter-group"><span id="rail-label-2">ETAPAS</span><div class="filter-value" id="investor-stage-value"></div></div><div class="filter-group"><span id="rail-label-3">TICKET</span><div class="filter-value" id="investor-ticket-value"></div></div><div class="filter-hint"><span>✦</span><span id="investor-compatible-count">Calculando compatibilidad...</span></div></div>
                 <div class="pro-rail"><span class="pro-star">✦</span><div><strong>Una comunidad abierta</strong><p>Perfiles, actualizaciones y conexiones sin costo.</p></div></div>
               </aside>
             </div>
@@ -148,9 +148,30 @@
             <div class="fund-grid" id="fund-grid"></div>
           </section>
 
+          <section class="view" id="view-profile"><div class="profile-page" id="profile-page"></div></section>
+
+          <section class="view" id="view-company">
+            <div class="page-intro page-intro-row"><div><div class="eyebrow muted-eyebrow">TU PRESENCIA CORPORATIVA</div><h1>Tu empresa<span class="heading-period">.</span></h1><p>Cuenta qué buscas y encuentra startups con quienes colaborar.</p></div><button class="primary-button" id="edit-company">Editar perfil de empresa</button></div>
+            <div class="startup-dashboard"><div class="dashboard-profile"><div class="dashboard-cover" id="company-cover"></div><div class="dashboard-company-logo" id="company-logo-dash">E</div><div class="dashboard-company-info"><span class="verified-pill">✓ PERFIL PÚBLICO</span><h2 id="company-dash-name">Tu empresa</h2><p id="company-dash-desc"></p><div class="tag-row" id="company-dash-tags"></div><button class="secondary-button" data-upload="avatar">Cambiar logo</button> <button class="secondary-button" data-upload="banner">Cambiar banner</button> <button class="secondary-button" id="view-own-profile-company">Ver perfil público</button></div></div><div class="dashboard-side"><div class="dashboard-stat"><span>Desafíos abiertos</span><strong id="company-open-challenges">0</strong><small>Visibles para startups</small></div><div class="dashboard-stat"><span>Startups seguidas</span><strong id="company-followed-count">0</strong><small>Tu lista de interés</small></div><div class="dashboard-stat"><span>Intereses enviados</span><strong id="company-interests-count">0</strong><small>Esperando respuesta o match</small></div></div></div>
+          </section>
+
+          <section class="view" id="view-challenges">
+            <div class="page-intro"><div class="eyebrow muted-eyebrow">INNOVACIÓN ABIERTA</div><h1>Mis desafíos<span class="heading-period">.</span></h1><p>Publica los problemas que quieres resolver con startups chilenas.</p></div>
+            <form class="compose-update" id="challenge-form"><div class="compose-content"><input name="title" placeholder="Título del desafío" minlength="3" maxlength="120" required /><textarea name="description" rows="2" placeholder="Describe el problema, el contexto y el tipo de solución que buscas" minlength="10" maxlength="1000" required></textarea><div class="compose-footer"><span id="challenge-note">Las startups verán tus desafíos abiertos en tu perfil.</span><button class="primary-button small-button" type="submit">Publicar desafío</button></div></div></form>
+            <div class="update-list" id="challenge-list"></div>
+          </section>
+
+          <section class="view" id="view-following">
+            <div class="page-intro"><div class="eyebrow muted-eyebrow">TU LISTA DE INTERÉS</div><h1>Seguidos<span class="heading-period">.</span></h1><p>Las startups que sigues y los intereses que has enviado.</p></div>
+            <div class="section-heading"><div><h2>Startups que sigues</h2></div></div>
+            <div class="match-list" id="followed-list"></div>
+            <div class="section-heading startup-update-heading"><div><h2>Intereses enviados</h2></div></div>
+            <div class="match-list" id="sent-interests"></div>
+          </section>
+
           <section class="view" id="view-startup">
             <div class="page-intro page-intro-row"><div><div class="eyebrow muted-eyebrow">PRESENCIA QUE ABRE PUERTAS</div><h1>Tu startup<span class="heading-period">.</span></h1><p>Cuenta lo que estás construyendo y encuentra a quienes creen en ello.</p></div><button class="primary-button" id="startup-create-fund">＋ Abrir una ronda</button></div>
-            <div class="startup-dashboard"><div class="dashboard-profile"><div class="dashboard-cover"></div><div class="dashboard-company-logo">N</div><div class="dashboard-company-info"><span class="verified-pill">✓ PERFIL PÚBLICO</span><h2>Nébula Health</h2><p>Diagnóstico preventivo con IA · Santiago, Chile</p><div class="tag-row"><span class="tag">Healthtech</span><span class="tag">Inteligencia artificial</span><span class="tag">Seed</span></div><button class="secondary-button" id="edit-startup">Editar perfil</button></div></div><div class="dashboard-side"><div class="dashboard-stat"><span>Vistas de perfil</span><strong>—</strong><small>Métrica no disponible aún</small></div><div class="dashboard-stat"><span>Inversores interesados</span><strong id="interested-count">0</strong><small>Solicitudes recibidas</small></div><div class="dashboard-stat"><span>Tu perfil</span><strong id="round-status">Sin publicar</strong><small>Visible para inversores</small></div></div></div>
+            <div class="startup-dashboard"><div class="dashboard-profile"><div class="dashboard-cover"></div><div class="dashboard-company-logo">N</div><div class="dashboard-company-info"><span class="verified-pill">✓ PERFIL PÚBLICO</span><h2>Nébula Health</h2><p>Diagnóstico preventivo con IA · Santiago, Chile</p><div class="tag-row"><span class="tag">Healthtech</span><span class="tag">Inteligencia artificial</span><span class="tag">Seed</span></div><button class="secondary-button" id="edit-startup">Editar perfil</button> <button class="secondary-button" data-upload="avatar">Cambiar logo</button> <button class="secondary-button" data-upload="banner">Cambiar banner</button> <button class="secondary-button" id="view-own-profile">Ver perfil público</button></div></div><div class="dashboard-side"><div class="dashboard-stat"><span>Vistas de perfil</span><strong>—</strong><small>Métrica no disponible aún</small></div><div class="dashboard-stat"><span>Inversores interesados</span><strong id="interested-count">0</strong><small>Solicitudes recibidas</small></div><div class="dashboard-stat"><span>Tu perfil</span><strong id="round-status">Sin publicar</strong><small>Visible para inversores</small></div></div></div>
             <div class="section-heading startup-update-heading"><div><div class="eyebrow muted-eyebrow">SOLICITUDES DE CONEXIÓN</div><h2>Intereses de inversores</h2></div></div>
             <div class="request-list" id="startup-requests"></div>
             <div class="section-heading startup-update-heading"><div><div class="eyebrow muted-eyebrow">COMPARTE TU PROGRESO</div><h2>Actualizaciones para inversores</h2></div></div>
@@ -183,6 +204,7 @@
           <form id="preferences-form">
             <fieldset class="preference-fieldset"><legend>Sectores de interés</legend><input type="search" id="sector-search" placeholder="Buscar sector" aria-label="Buscar sector" autocomplete="off" /><div class="preference-options" id="sector-options"></div></fieldset>
             <fieldset class="preference-fieldset"><legend>Etapas</legend><div class="preference-options" id="stage-options"></div></fieldset>
+            <label>Tipo de inversionista<select name="investorType"><option value="Angel">Ángel</option><option value="VC">Fondo de venture capital</option><option value="Corporate">Corporate (capital de riesgo corporativo, CVC)</option></select></label>
             <div class="form-row"><label>Ticket mínimo (USD)<input required name="minTicket" type="number" min="1" /></label><label>Ticket máximo (USD)<input required name="maxTicket" type="number" min="1" /></label></div>
             <p class="form-disclaimer">El orden combina la compatibilidad de ambas partes; si el mínimo supera el máximo, no se guardarán los cambios.</p>
             <button class="primary-button modal-submit" type="submit">Guardar y actualizar startups <span>→</span></button>
@@ -199,14 +221,63 @@
           <div class="form-row"><label>Ticket mínimo (USD)<input required name="checkMin" type="number" min="1" value="25000" /></label><label>Ticket máximo (USD)<input required name="checkMax" type="number" min="1" value="150000" /></label></div>
           <label>Descripción<textarea required name="description" rows="3" minlength="20" maxlength="1000"></textarea></label>
           <label>Modelo de negocio<select name="businessModel"><option>B2B</option><option>B2B2C</option><option>B2C</option></select></label>
+          <label>Video pitch (enlace de YouTube, Vimeo o Loom)<input name="pitchVideo" type="url" maxlength="300" placeholder="https://www.youtube.com/watch?v=..." /><span class="field-hint">Ideal: 60–120 segundos. Cuenta el problema, tu solución, tu tracción y lo que pides.</span></label>
           <label class="fundraising-toggle"><input name="isFundraising" type="checkbox" /> Estoy buscando inversión ahora; mostrar mi ronda en “Rondas abiertas”.</label>
           <p class="auth-error" id="startup-profile-error" role="alert" hidden></p>
           <button class="primary-button modal-submit" type="submit">Guardar perfil y aparecer a inversores <span>→</span></button>
         </form>
       </div>
     </div>
+    <div class="modal-backdrop" id="company-profile-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="company-profile-title">
+        <div class="modal-eyebrow">PERFIL DE EMPRESA · CHILE</div><h2 id="company-profile-title">Presenta tu empresa<span class="heading-period">.</span></h2><p class="modal-copy">Cuéntanos qué tipo de colaboración buscas para mostrarte las startups más afines.</p>
+        <form id="company-profile-form">
+          <label>Nombre de la empresa<input required name="name" minlength="2" maxlength="120" /></label>
+          <div class="form-row"><label>Rubro<select name="sector"></select></label><label>Tamaño<select name="size"><option>1-10</option><option>11-50</option><option>51-200</option><option>201-1000</option><option>1000+</option></select></label></div>
+          <div class="form-row"><label>Ciudad<input required name="city" placeholder="Santiago" /></label><label>Sitio web<input name="website" type="url" placeholder="https://" /></label></div>
+          <label>Descripción<textarea required name="description" rows="3" minlength="20" maxlength="1000"></textarea></label>
+          <fieldset class="preference-fieldset"><legend>Tipos de colaboración que buscas</legend><div class="preference-options" id="collab-options"></div></fieldset>
+          <label>Desafíos de innovación<textarea name="challenges" rows="2" maxlength="1000" placeholder="¿Qué problemas quieres resolver con startups?"></textarea></label>
+          <p class="auth-error" id="company-profile-error" role="alert" hidden></p>
+          <button class="primary-button modal-submit" type="submit">Guardar perfil de empresa <span>→</span></button>
+        </form>
+      </div>
+    </div>
+    <div class="modal-backdrop" id="profile-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title">
+        <button class="modal-close" id="close-profile-modal" aria-label="Cerrar">×</button>
+        <div class="modal-eyebrow">TU PERFIL</div><h2 id="profile-modal-title">Edita tu perfil<span class="heading-period">.</span></h2>
+        <form id="profile-form">
+          <label>Nombre<input required name="fullName" minlength="2" maxlength="120" /></label>
+          <div class="form-row"><label>Ciudad<input name="city" maxlength="100" /></label><label>Titular<input name="headline" maxlength="160" placeholder="Ej.: Inversionista ángel en salud" /></label></div>
+          <label>Acerca de ti<textarea name="bio" rows="3" maxlength="1000"></textarea></label>
+          <p class="auth-error" id="profile-error" role="alert" hidden></p>
+          <button class="primary-button modal-submit" type="submit">Guardar perfil <span>→</span></button>
+        </form>
+      </div>
+    </div>
+    <div class="modal-backdrop" id="image-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="image-title">
+        <button class="modal-close" id="close-image-modal" aria-label="Cerrar">×</button>
+        <div class="modal-eyebrow" id="image-eyebrow">FOTO</div><h2 id="image-title">Sube una imagen<span class="heading-period">.</span></h2>
+        <p class="modal-copy" id="image-copy">JPG, PNG o WebP. Arrastra la imagen para encuadrarla y ajusta el zoom.</p>
+        <label class="file-pick">Elegir imagen<input type="file" id="image-file" accept="image/jpeg,image/png,image/webp" /></label>
+        <div class="crop-wrap"><canvas id="image-canvas" class="crop-canvas" aria-label="Vista previa del recorte"></canvas></div>
+        <label class="zoom-row">Zoom<input type="range" id="image-zoom" min="1" max="3" step="0.05" value="1" /></label>
+        <p class="auth-error" id="image-error" role="alert" hidden></p>
+        <button class="primary-button modal-submit" id="image-save" type="button" disabled>Guardar imagen <span>→</span></button>
+      </div>
+    </div>
+    <div class="modal-backdrop" id="pitch-modal" aria-hidden="true">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="pitch-title">
+        <button class="modal-close" id="close-pitch-modal" aria-label="Cerrar">×</button>
+        <div class="modal-eyebrow">VIDEO PITCH</div><h2 id="pitch-title">Pitch<span class="heading-period">.</span></h2>
+        <div class="video-frame"><iframe id="pitch-frame" title="Video pitch" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" allow="autoplay; fullscreen; picture-in-picture"></iframe></div>
+      </div>
+    </div>
     <script src="supabase-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="media.js"></script>
     <script src="supabase-app.js"></script>
     <script src="app.js"></script>
   </body>
