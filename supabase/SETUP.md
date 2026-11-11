@@ -5,7 +5,7 @@ Venturea puede usar un proyecto de Supabase en el plan Free. No se debe cambiar 
 ## 1. Crear la instancia gratuita
 
 1. Crea una organización y un proyecto en Supabase y selecciona **Free**. No elijas Pro ni agregues complementos.
-2. En **SQL Editor**, ejecuta todo el contenido de [`schema.sql`](./schema.sql). Esto crea perfiles, preferencias, startups, actualizaciones, intereses y políticas RLS.
+2. En **SQL Editor**, ejecuta en orden cada archivo de [`migrations/`](./migrations) (`001_init.sql`, `002_search.sql`, ...). Esto crea perfiles, preferencias, startups, actualizaciones, intereses y políticas RLS.
 3. En **Project Settings → API**, copia el **Project URL** y la clave **anon/publicable**. Nunca copies una `service_role` o clave secreta en el frontend.
 4. En **Authentication → URL Configuration**, agrega la URL local permitida `http://localhost:8000/**` y define `http://localhost:8000/` como Site URL.
 5. Mantén activa la confirmación de correo si deseas verificar cuentas. El enlace de confirmación regresa a la URL local permitida.

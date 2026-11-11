@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- Carga index.html real dentro de un iframe con un Supabase falso; ver tests/run.mjs -->
+<meta charset="utf-8" />
+<pre id="out">pending</pre>
+<iframe id="app" style="width:1280px;height:900px" src="../index.html?test=1"></iframe>
+<script src="mock-supabase.js"></script>
+<script src="scenarios.js"></script>
+<script>
+  const frame = document.querySelector("#app");
+  const scenarioName = new URLSearchParams(location.search).get("s");
+  const results = [];
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function until(test, label, tries = 60) {
+    for (let i = 0; i < tries; i++) { if (test()) return; await wait(50); }
+    throw new Error(`timeout: ${label}`);
+  }
+  async function main() {
+    const scenario = window.SCENARIOS[scenarioName];
+    const log = [];
+    const db = scenario.db();
+    // El iframe se crea antes de inyectar el cliente falso: se sustituye el SDK antes de que corran los scripts de la app.
+    frame.src = "about:blank";
+    await wait(10);
+    const doc = frame.contentDocument;
+    const html = await (await fetch("../index.html")).text();
+    const patched = html
+      .replace(/<script src="https:\/\/cdn[^"]*"><\/script>/, "")
+      .replace(/<script src="supabase-config.js"><\/script>/, "")
+      .replaceAll(/src="(?!http)([^"]+\.js)"/g, 'src="../$1"')
+      .replace('href="styles.css"', 'href="../styles.css"')
+      .replace("</head>", `<script>
+        window.VENTUREA_CONFIG = { supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "k" };
+        window.supabase = { createClient: () => parent.__client };
+      <\/script></head>`);
+    window.__client = window.createMockSupabase(db, { ...scenario.options, log });
+    doc.open(); doc.write(patched); doc.close();
+    const ctx = {
+      doc, win: frame.contentWindow, db, log, wait, until,
+      $: (s) => doc.querySelector(s), $$: (s) => [...doc.querySelectorAll(s)],
+      ok(cond, label) { results.push({ ok: !!cond, label }); },
+      visible(el) { return !!el && !el.hidden && el.getClientRects().length > 0; }
+    };
+    await scenario.run(ctx);
+  }
+  main().catch((e) => results.push({ ok: false, label: `EXCEPCIÓN: ${e.message}` })).finally(() => {
+    document.querySelector("#out").textContent = "RESULT:" + JSON.stringify(results) + ":END";
+  });
+</script>
