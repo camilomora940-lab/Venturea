@@ -29,9 +29,12 @@ const searchRpc = { search_all: async ({ q }) => (q === "neb" ? [
 
 const key = (ctx, init) => ctx.doc.dispatchEvent(new ctx.win.KeyboardEvent("keydown", { bubbles: true, ...init }));
 const navLabels = (ctx) => ctx.$$("#main-nav .nav-link").map((b) => [...b.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim());
-const appReady =(ctx) => ctx.until(() => ctx.visible(ctx.$(".app-shell")) && ctx.$$("#main-nav .nav-link").length, "app listo");
+const appReady =(ctx) => ctx.until(() => ctx.visible(ctx.$(".app-shell")) && ctx.$("#profile-button").title === "Menú de cuenta" && ctx.$$("#main-nav .nav-link").length, "app listo");
 
 window.SCENARIOS = {
+  // Escenarios shot_* solo dejan la interfaz abierta para tomar capturas (SHOT=carpeta node tests/run.mjs shot_)
+  shot_investor: { db: baseDb, options: { userId: "inv1", rpc: searchRpc }, async run(ctx) { await appReady(ctx); ctx.ok(true, "interfaz abierta"); await ctx.wait(400); } },
+  shot_startup: { db: baseDb, options: { userId: "own1" }, async run(ctx) { await appReady(ctx); ctx.ok(true, "interfaz abierta"); await ctx.wait(400); } },
   phase0_investor: {
     db: baseDb,
     options: { userId: "inv1", rpc: searchRpc },

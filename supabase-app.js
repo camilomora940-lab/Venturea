@@ -45,6 +45,8 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     appShell.hidden = false;
     appShell.classList.add("authenticated");
   };
+  // Portada por sector sin banner: degradado cobalto→violeta, cobalto→esmeralda o marino→cobalto, estable por sector.
+  const coverClass = (sector) => ["", "cover-emerald", "cover-navy"][[...String(sector)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 3];
   const setText = (selector, value) => {
     const element = $(selector);
     if (element) element.textContent = String(value);
@@ -244,7 +246,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     card.hidden = false;
     empty.hidden = true;
     $("#card-number").textContent = `${String(selectedIndex + 1).padStart(2, "0")} / ${String(rankedStartups.length).padStart(2, "0")}`;
-    $("#card-cover").className = `startup-cover ${startup.sector === "Climate tech" ? "cover-climate" : startup.sector === "Fintech" ? "cover-fintech" : startup.sector === "SaaS" ? "cover-saas" : startup.sector === "Inteligencia artificial" ? "cover-ai" : ""}`;
+    $("#card-cover").className = `startup-cover ${coverClass(startup.sector)}`;
     $("#company-logo").textContent = startup.name.slice(0, 1).toUpperCase();
     $("#company-name").textContent = startup.name;
     $("#company-location").textContent = `${startup.city}, Chile`;

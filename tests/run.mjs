@@ -41,6 +41,7 @@ for (const name of names) {
     "--headless=new", "--disable-gpu", `--user-data-dir=${dir}`, "--window-size=1280,900", "--virtual-time-budget=15000",
     "--dump-dom", `http://127.0.0.1:${port}/tests/harness.html?s=${name}`
   ], { maxBuffer: 1e8 }, (_e, out) => resolve(out)));
+  if (process.env.SHOT) await new Promise((resolve) => execFile(browser, ["--headless=new", "--disable-gpu", `--user-data-dir=${dir}s`, "--window-size=1320,1000", "--virtual-time-budget=15000", `--screenshot=${join(process.env.SHOT, name + ".png")}`, `http://127.0.0.1:${port}/tests/harness.html?s=${name}`], resolve));
   const match = /RESULT:(.*?):END/s.exec(html || "");
   if (!match) { console.log(`✗ ${name}: sin resultado`); failures++; continue; }
   const results = JSON.parse(match[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"));
