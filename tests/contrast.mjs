@@ -15,7 +15,7 @@ const pairs = [
   ["violet", "surface", "rol Empresa"], ["alert", "surface", "notificaciones"], ["ink", "surface", "texto principal"],
   ["muted", "surface", "texto secundario"], ["muted", "bg", "texto secundario sobre fondo"], ["surface", "primary", "texto sobre botón"],
   ["navy", "amber", "insignia Pro"], ["primary", "primary-soft", "etiquetas"], ["emerald-text", "emerald-soft", "etiqueta esmeralda"],
-  ["violet", "violet-soft", "etiqueta violeta"], ["surface", "alert", "contador de notificaciones"], ["muted", "primary-soft", "texto sobre aviso"]
+  ["violet", "violet-soft", "etiqueta violeta"], ["alert", "alert-soft", "etiqueta de categoría"], ["navy", "amber-soft", "etiqueta ámbar"], ["navy", "line", "etiqueta gris"], ["muted", "line", "ronda cerrada"], ["surface", "navy-soft", "etiqueta marino"], ["surface", "alert", "contador de notificaciones"], ["muted", "primary-soft", "texto sobre aviso"]
 ];
 let failures = 0;
 for (const [fg, bg, use] of pairs) {

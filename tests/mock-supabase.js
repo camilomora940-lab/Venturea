@@ -1,7 +1,16 @@
 // Cliente Supabase falso en memoria para probar la interfaz sin red (ver tests/run.mjs).
 // Soporta lo que usa supabase-app.js: from().select/insert/update/delete con filtros, rpc, auth, storage y canales.
 window.createMockSupabase = function createMockSupabase(db, options = {}) {
-  const { userId, rpc = {}, log = [] } = options;
+  const { userId, log = [] } = options;
+  // Funciones SQL que casi todas las pantallas usan; cada escenario puede reemplazarlas con options.rpc.
+  const rpc = {
+    follower_counts: async ({ p_startup_id }, data) => {
+      const rows = (data.follows || []).filter((follow) => follow.startup_id === p_startup_id);
+      const roleOf = (id) => (data.profiles || []).find((item) => item.id === id)?.role;
+      return [{ total: rows.length, investors: rows.filter((row) => roleOf(row.follower_id) === "investor").length, companies: rows.filter((row) => roleOf(row.follower_id) === "company").length }];
+    },
+    ...(options.rpc || {})
+  };
   const clone = (value) => JSON.parse(JSON.stringify(value));
   let ids = 1000;
   // Valores por defecto de la base (las columnas con DEFAULT en las migraciones).
@@ -83,7 +92,7 @@ window.createMockSupabase = function createMockSupabase(db, options = {}) {
       })
     },
     channel: (name) => {
-      const channel = { name, handlers: [], on(_type, _filter, handler) { channel.handlers.push(handler); return channel; }, subscribe(cb) { cb?.("SUBSCRIBED"); return channel; } };
+      const channel = { name, handlers: [], on(_type, _filter, handler) { channel.handlers.push(handler); return channel; }, subscribe(cb) { cb?.(options.realtimeStatus || "SUBSCRIBED"); return channel; } };
       channels.push(channel);
       return channel;
     },

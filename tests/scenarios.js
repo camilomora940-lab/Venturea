@@ -18,7 +18,19 @@ const startupRow = (id, owner, name, sector_id, extra = {}) => ({
   target_amount_usd: 500000, preferred_check_min_usd: 25000, preferred_check_max_usd: 250000, business_model: "B2B", traction_score: 0.5,
   desired_investor_types: ["Angel", "VC"], desired_stages: ["Seed"], is_fundraising: false, is_published: true, created_at: "2026-01-01T00:00:00Z", ...extra
 });
-const roundRow = (id, startup_id, extra = {}) => ({ id, startup_id, status: "open", stage: "Seed", target_usd: 500000, ticket_min_usd: 25000, ticket_max_usd: 250000, committed_pct: 0, ...extra });
+const CATEGORY_ROWS = [["hito", "Hito"], ["financiamiento", "Financiamiento"], ["producto", "Producto"], ["equipo", "Equipo y talento"], ["prensa", "Prensa"], ["evento", "Evento"], ["alianza", "Busco alianza/piloto"]]
+  .map(([id, name], index) => ({ id, name, sort_order: index + 1 }));
+// 45 publicaciones alternando s1/s2 y repartidas en las 7 categorías (para probar filtros y paginación de 20).
+const manyPosts = () => Array.from({ length: 45 }, (_, i) => ({
+  id: `p${i}`, startup_id: i % 2 ? "s2" : "s1", author_id: i % 2 ? "own2" : "own1", content: `Novedad número ${i}`,
+  category: CATEGORY_ROWS[i % 7].id, created_at: new Date(Date.UTC(2026, 3, 1) - i * 3600000).toISOString()
+}));
+const followerRpc = { follower_counts: async ({ p_startup_id }, db) => {
+  const rows = db.follows.filter((follow) => follow.startup_id === p_startup_id);
+  const roleOf = (id) => db.profiles.find((profile) => profile.id === id)?.role;
+  return [{ total: rows.length, investors: rows.filter((r) => roleOf(r.follower_id) === "investor").length, companies: rows.filter((r) => roleOf(r.follower_id) === "company").length }];
+} };
+const roundRow = (id, startup_id, extra = {}) => ({ id, startup_id, status: "open", stage: "Seed", target_usd: 500000, ticket_min_usd: 25000, ticket_max_usd: 250000, committed_pct: 0, created_at: "2026-03-01T00:00:00Z", ...extra });
 const baseDb = () => ({
   profiles: [
     { id: "inv1", role: "investor", full_name: "Ana Inversora", city: "Santiago", headline: "Inversionista ángel en salud", bio: "Invierto en equipos fundadores técnicos.", avatar_url: null, banner_url: null },
@@ -34,6 +46,8 @@ const baseDb = () => ({
   company_challenges: [{ id: "ch1", company_id: "c1", title: "Reducir esperas en urgencias", description: "Buscamos triage asistido por IA.", status: "open", created_at: "2026-03-01T00:00:00Z" }],
   follows: [{ id: "f1", follower_id: "comp1", startup_id: "s2", created_at: "2026-03-02T00:00:00Z" }],
   sectors: SECTOR_ROWS,
+  post_categories: CATEGORY_ROWS,
+  notifications: [],
   investor_preferences: [{
     user_id: "inv1", stages: ["Seed"], min_ticket_usd: 25000, max_ticket_usd: 250000, investor_type: "Angel",
     markets: ["Chile"], preferred_models: ["B2B"]
@@ -49,7 +63,7 @@ const baseDb = () => ({
     startupRow("s3", "own3", "Agro Uno", "agrotech", { pitch_video_url: "https://evil.example.com/v/1" })
   ],
   interests: [{ id: "i1", investor_id: "inv1", startup_id: "s1", status: "pending", created_at: "2026-02-01T00:00:00Z" }],
-  posts: [{ id: "u1", startup_id: "s1", author_id: "own1", content: "Cerramos un piloto", created_at: "2026-02-01T00:00:00Z" }]
+  posts: [{ id: "u1", startup_id: "s1", author_id: "own1", content: "Cerramos un piloto", category: "hito", created_at: "2026-02-01T00:00:00Z" }]
 });
 const searchRpc = { search_all: async ({ q }) => ({
   neb: [
@@ -88,6 +102,191 @@ const typeSearch = async (ctx, text) => {
 };
 
 window.SCENARIOS = {
+  phase3_publicaciones: {
+    db: () => ({ ...baseDb(), posts: manyPosts(), follows: [{ id: "f9", follower_id: "inv1", startup_id: "s2" }] }),
+    options: { userId: "inv1" },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.$('#main-nav [data-view="updates"]').click();
+      await ctx.until(() => ctx.$$("#update-list .update-item").length === 20, "primera página");
+      ctx.ok(ctx.$$("#post-chips .chip").map((c) => c.textContent).join("|") === "Todas|Hito|Financiamiento|Producto|Equipo y talento|Prensa|Evento|Busco alianza/piloto", "chips: Todas + las 7 categorías");
+      ctx.ok(ctx.visible(ctx.$("#load-more-posts")), "hay botón para cargar más");
+      ctx.$("#load-more-posts").click();
+      await ctx.until(() => ctx.$$("#update-list .update-item").length === 40, "segunda página");
+      ctx.$("#load-more-posts").click();
+      await ctx.until(() => ctx.$$("#update-list .update-item").length === 45, "tercera página");
+      ctx.ok(!ctx.visible(ctx.$("#load-more-posts")), "paginación completa: 20 + 20 + 5 y sin más botón");
+      ctx.$('#post-chips [data-post-cat="hito"]').click();
+      await ctx.until(() => ctx.$$("#update-list .update-item").length === 7, "filtro hito");
+      ctx.ok(ctx.$$("#update-list .cat-tag").every((t) => t.textContent === "Hito"), "solo se ven publicaciones de la categoría elegida");
+      const select = ctx.log.filter((e) => e.table === "posts" && e.op === "select").pop();
+      ctx.ok(select.filters >= 1, "el filtro se hace en la consulta, no ocultando elementos");
+      ctx.$('#post-chips [data-post-cat="all"]').click();
+      await ctx.until(() => ctx.$$("#update-list .update-item").length === 20, "todas otra vez");
+      const sector = ctx.$("#post-sector-filter");
+      sector.value = "healthtech";
+      sector.dispatchEvent(new ctx.win.Event("change", { bubbles: true }));
+      await ctx.until(() => ctx.$$("#update-list .update-item").length === 20 && ctx.$$("#update-list .update-logo").every((l) => l.textContent === "N"), "filtro de sector");
+      ctx.ok(true, "el filtro por sector muestra solo la startup de ese sector (N = Nébula)");
+      sector.value = "all";
+      sector.dispatchEvent(new ctx.win.Event("change", { bubbles: true }));
+      ctx.$("#post-following-only").click();
+      await ctx.until(() => ctx.$$("#update-list .update-item").length === 20 && ctx.$$("#update-list .update-logo").every((l) => l.textContent === "F"), "solo seguidos");
+      ctx.ok(true, "'Solo de quienes sigo' muestra solo a Finova (F)");
+      ctx.$('#post-chips [data-post-cat="prensa"]').click();
+      await ctx.until(() => ctx.$$("#update-list .update-item").length > 0 && ctx.$$("#update-list .cat-tag").every((t) => t.textContent === "Prensa"), "combinado");
+      ctx.ok(ctx.$$("#update-list .update-logo").every((l) => l.textContent === "F"), "los filtros se combinan");
+    }
+  },
+  phase3_publicar_categoria: {
+    db: baseDb,
+    options: { userId: "own1" },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.ok(ctx.$$("#post-category option").length === 8 && ctx.$("#post-category").required, "el compositor exige una de las 7 categorías");
+      ctx.$("#update-input").value = "Lanzamos la versión 2";
+      ctx.$("#publish-update").click();
+      await ctx.wait(100);
+      ctx.ok(!ctx.db.posts.some((p) => p.content === "Lanzamos la versión 2"), "sin categoría no se publica");
+      ctx.$("#post-category").value = "producto";
+      ctx.$("#publish-update").click();
+      await ctx.wait(200);
+      const post = ctx.db.posts.find((p) => p.content === "Lanzamos la versión 2");
+      ctx.ok(post && post.category === "producto", "la publicación queda con su categoría");
+      ctx.$('#main-nav [data-view="startup"]').click();
+      await ctx.until(() => /Producto/.test(ctx.$("#founder-updates").textContent), "mis publicaciones");
+      ctx.ok(ctx.$("#founder-updates .cat-tag"), "la categoría aparece como etiqueta de color en cada publicación");
+    }
+  },
+  phase3_financiamiento: {
+    db: baseDb,
+    options: { userId: "own1" },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.until(() => ctx.$("#funding-switch").checked, "interruptor encendido");
+      ctx.ok(/Ronda abierta · Seed/.test(ctx.$("#funding-status").textContent) && ctx.$("#funding-switch-label").textContent === "Sí", "el interruptor refleja la ronda abierta");
+      ctx.ok(ctx.$("#open-rounds-count").textContent === "2", "dos rondas abiertas en la plataforma");
+      ctx.$("#funding-switch").click();
+      await ctx.until(() => ctx.db.funding_rounds.find((r) => r.id === "r1").status === "paused", "pausada");
+      await ctx.wait(150);
+      ctx.ok(!ctx.$("#funding-switch").checked && /Ronda pausada/.test(ctx.$("#round-status").textContent), "apagar el interruptor pausa la ronda");
+      ctx.ok(ctx.$("#open-rounds-count").textContent === "1", "la ronda pausada sale de Rondas abiertas");
+      ctx.$('[data-round-action="open"]').click();
+      await ctx.until(() => ctx.db.funding_rounds.find((r) => r.id === "r1").status === "open", "reabierta");
+      await ctx.wait(150);
+      ctx.ok(ctx.$("#funding-switch").checked && ctx.$("#open-rounds-count").textContent === "2", "reabrir vuelve a publicarla");
+      ctx.$('[data-round-action="closed"]').click();
+      await ctx.until(() => ctx.db.funding_rounds.find((r) => r.id === "r1").status === "closed", "cerrada");
+      await ctx.wait(150);
+      ctx.ok(ctx.$$("#funding-history .funding-row").length === 1 && /Cerrada/.test(ctx.$("#funding-history").textContent), "el historial conserva la ronda cerrada");
+      ctx.$("#funding-switch").click();
+      ctx.ok(ctx.$("#round-modal").classList.contains("open") && !ctx.$("#funding-switch").checked, "encender el interruptor abre el formulario corto de ronda");
+      const form = ctx.$("#round-form");
+      form.elements.ticketMin.value = "300000";
+      form.elements.ticketMax.value = "100000";
+      form.requestSubmit();
+      await ctx.wait(100);
+      ctx.ok(/ticket máximo/.test(ctx.$("#round-error").textContent), "valida el rango de ticket");
+      form.elements.ticketMin.value = "50000";
+      form.elements.ticketMax.value = "300000";
+      form.elements.target.value = "2000000";
+      form.elements.closesAt.value = "2026-12-31";
+      form.requestSubmit();
+      await ctx.until(() => ctx.db.funding_rounds.some((r) => r.startup_id === "s1" && r.status === "open" && r.id !== "r1"), "ronda nueva");
+      await ctx.wait(150);
+      const round = ctx.db.funding_rounds.find((r) => r.startup_id === "s1" && r.status === "open");
+      ctx.ok(round.target_usd === 2000000 && round.ticket_min_usd === 50000 && round.ticket_max_usd === 300000 && new Date(round.closes_at).getFullYear() === 2026, "crea la ronda con monto, ticket y fecha de cierre");
+      ctx.ok(ctx.$("#funding-switch").checked && ctx.$$("#funding-history .funding-row").length === 2, "queda abierta y el historial suma la nueva");
+      ctx.$('#main-nav [data-view="funds"]').click();
+      ctx.$("#open-fund-modal").click();
+      ctx.ok(!ctx.$("#open-fund-modal").hidden && ctx.$("#round-modal").classList.contains("open"), "el botón de Rondas abiertas usa el mismo flujo");
+    }
+  },
+  phase3_seguidores: {
+    db: () => ({ ...baseDb(), follows: [{ id: "f1", follower_id: "comp1", startup_id: "s1" }] }),
+    options: { userId: "inv1", rpc: followerRpc },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.ok(ctx.visible(ctx.$("#follow-button")) && ctx.$("#follow-button").textContent === "Seguir", "la tarjeta tiene botón Seguir");
+      ctx.ok(ctx.$("#company-tags .tag.funding"), "la tarjeta lleva la insignia 'Buscando financiamiento'");
+      ctx.$("#follow-button").click();
+      await ctx.until(() => ctx.db.follows.some((f) => f.follower_id === "inv1" && f.startup_id === "s1"), "seguimiento");
+      ctx.ok(ctx.$("#follow-button").textContent === "Siguiendo ✓", "el botón pasa a Siguiendo");
+      ctx.$("#info-button").click();
+      await ctx.until(() => ctx.$("#follower-line"), "conteo");
+      ctx.ok(/2\s*seguidores/.test(ctx.$("#follower-line").textContent) && /1 inversionistas/.test(ctx.$("#follower-line").textContent) && /1 empresas/.test(ctx.$("#follower-line").textContent), `el perfil muestra 2 seguidores · 1 inversionistas · 1 empresas (${ctx.$("#follower-line").textContent})`);
+      ctx.ok(ctx.$("#follower-line .role-investor") && ctx.$("#follower-line .role-company"), "cada tipo con su color");
+      ctx.ok(ctx.$("#profile-page [data-follow]").textContent === "Siguiendo ✓", "el perfil también muestra el estado de seguimiento");
+      ctx.$("#profile-page [data-follow]").click();
+      await ctx.until(() => !ctx.db.follows.some((f) => f.follower_id === "inv1"), "dejar de seguir");
+      await ctx.until(() => /1\s*seguidores/.test(ctx.$("#follower-line").textContent), "conteo actualizado");
+      ctx.ok(/1\s*seguidores/.test(ctx.$("#follower-line").textContent) && /0 inversionistas/.test(ctx.$("#follower-line").textContent), "dejar de seguir actualiza el conteo");
+    }
+  },
+  phase3_panel_startup_seguidores: {
+    db: () => ({ ...baseDb(), follows: [{ id: "f1", follower_id: "comp1", startup_id: "s1" }, { id: "f2", follower_id: "inv1", startup_id: "s1" }] }),
+    options: { userId: "own1", rpc: followerRpc },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.until(() => ctx.$("#followers-investors").textContent === "1", "conteo inversionistas");
+      ctx.ok(ctx.$("#followers-investors").textContent === "1" && ctx.$("#followers-companies").textContent === "1", "Mi startup muestra seguidores inversionistas y empresas por separado");
+      ctx.ok(!/Vistas de perfil/.test(ctx.$("#view-startup").textContent), "se reemplazó la tarjeta 'Vistas de perfil'");
+    }
+  },
+  phase3_notificaciones: {
+    db: () => ({ ...baseDb(), notifications: [
+      { id: "n1", user_id: "own1", type: "follow", actor_id: "inv1", entity_id: "s1", read_at: null, created_at: "2026-04-01T10:00:00Z" },
+      { id: "n2", user_id: "own1", type: "interest", actor_id: "comp1", entity_id: "s1", read_at: null, created_at: "2026-04-01T09:00:00Z" },
+      { id: "n3", user_id: "own1", type: "follow", actor_id: "inv1", entity_id: "s1", read_at: "2026-03-01T00:00:00Z", created_at: "2026-03-01T00:00:00Z" },
+      { id: "n4", user_id: "inv1", type: "match", actor_id: "own1", entity_id: "s1", read_at: null, created_at: "2026-04-01T08:00:00Z" }
+    ] }),
+    options: { userId: "own1", rpc: followerRpc },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.until(() => ctx.visible(ctx.$("#notif-badge")), "campana");
+      ctx.ok(ctx.$("#notif-badge").textContent === "2", "la campana cuenta solo las no leídas propias (2)");
+      ctx.ok(ctx.$("#notification-button .notification-dot").hidden, "el punto naranjo fijo se reemplazó por el contador");
+      const channel = window.__client.__channels[0];
+      ctx.ok(channel && channel.name === "notifications-own1", "se suscribe a Realtime con el canal del usuario");
+      const arrive = (id) => {
+        const row = { id, user_id: "own1", type: "follow", actor_id: "inv1", entity_id: "s1", read_at: null, created_at: new Date().toISOString() };
+        ctx.db.notifications.push(row);
+        channel.handlers[0]({ new: row });
+      };
+      arrive("n10");
+      await ctx.until(() => ctx.$$("#notice-stack .notice-card").length === 1, "aviso");
+      ctx.ok(/Ana Inversora \(inversionista\) comenzó a seguir a Nébula Health/.test(ctx.$("#notice-stack").textContent), "el aviso dice quién siguió y a quién");
+      ctx.ok(ctx.$("#notice-stack [data-notice-open]").textContent === "Ver perfil", "el aviso trae el botón Ver perfil");
+      ctx.ok(ctx.$("#notif-badge").textContent === "3", "la campana suma una no leída");
+      arrive("n11"); arrive("n12"); arrive("n13");
+      await ctx.until(() => ctx.$("#notif-badge").textContent === "6", "seis no leídas");
+      await ctx.wait(100);
+      ctx.ok(ctx.$$("#notice-stack .notice-card").length === 3, "se apilan como máximo 3 avisos");
+      await ctx.wait(6500);
+      ctx.ok(ctx.$$("#notice-stack .notice-card").length === 0, "los avisos se cierran solos a los 6 segundos");
+      ctx.$("#notification-button").click();
+      await ctx.until(() => ctx.$$("#notification-panel .notice-row").length === 7, "historial");
+      ctx.ok(ctx.$$("#notification-panel .notice-row.unread").length === 6, "el historial resalta lo nuevo");
+      await ctx.until(() => ctx.$("#notif-badge").hidden, "marcadas como leídas");
+      ctx.ok(ctx.db.notifications.filter((n) => n.user_id === "own1").every((n) => n.read_at), "al abrir el panel se marcan como leídas");
+      ctx.ok(ctx.db.notifications.find((n) => n.id === "n4").read_at === null, "no toca las notificaciones de otros usuarios");
+      ctx.$("#notification-panel .notice-row").click();
+      await ctx.until(() => ctx.$("#view-profile").classList.contains("active") && /Ana Inversora/.test(ctx.$("#profile-page").textContent), "perfil de quien siguió");
+      ctx.ok(ctx.$("#notification-panel").hidden, "el panel se cierra al abrir un perfil");
+    }
+  },
+  phase3_notificaciones_sin_realtime: {
+    db: baseDb,
+    options: { userId: "own1", realtimeStatus: "CHANNEL_ERROR", pollMs: 400 },
+    async run(ctx) {
+      await appReady(ctx);
+      ctx.ok(ctx.$$("#notice-stack .notice-card").length === 0, "sin avisos al comenzar");
+      ctx.db.notifications.push({ id: "n20", user_id: "own1", type: "round_opened", actor_id: "own2", entity_id: "s2", read_at: null, created_at: new Date().toISOString() });
+      await ctx.until(() => ctx.$$("#notice-stack .notice-card").length === 1, "aviso por consulta periódica", 600);
+      ctx.ok(/Finova abrió una ronda de financiamiento/.test(ctx.$("#notice-stack").textContent), "si Realtime falla, la consulta periódica trae el aviso");
+      ctx.ok(ctx.$("#notif-badge").textContent === "1", "y la campana suma una");
+    }
+  },
   phase2_empresa_alta: {
     db: () => ({ ...baseDb(), company_profiles: [] }),
     options: { userId: "comp2" },
@@ -252,6 +451,20 @@ window.SCENARIOS = {
   // Escenarios shot_* solo dejan la interfaz abierta para tomar capturas (SHOT=carpeta node tests/run.mjs shot_)
   shot_investor: { db: baseDb, options: { userId: "inv1", rpc: searchRpc }, async run(ctx) { await appReady(ctx); ctx.ok(true, "interfaz abierta"); await ctx.wait(400); } },
   shot_perfil: { db: baseDb, options: { userId: "inv1" }, async run(ctx) { await appReady(ctx); ctx.$("#info-button").click(); await ctx.until(() => ctx.$("#profile-page iframe"), "perfil"); ctx.ok(true, "perfil abierto"); await ctx.wait(600); } },
+  shot_actualizaciones: { db: () => ({ ...baseDb(), posts: manyPosts() }), options: { userId: "inv1" }, async run(ctx) { await appReady(ctx); ctx.$('#main-nav [data-view="updates"]').click(); await ctx.until(() => ctx.$$("#update-list .update-item").length === 20, "posts"); ctx.ok(true, "actualizaciones"); await ctx.wait(500); } },
+  shot_financiamiento: {
+    db: () => ({ ...baseDb(), notifications: [] }), options: { userId: "own1" },
+    async run(ctx) {
+      await appReady(ctx);
+      await ctx.until(() => ctx.$("#funding-switch").checked, "interruptor");
+      const row = { id: "nx", user_id: "own1", type: "follow", actor_id: "inv1", entity_id: "s1", read_at: null, created_at: new Date().toISOString() };
+      ctx.db.notifications.push(row);
+      window.__client.__channels[0].handlers[0]({ new: row });
+      await ctx.until(() => ctx.$$("#notice-stack .notice-card").length === 1, "aviso");
+      ctx.$("#view-startup .funding-panel").scrollIntoView();
+      ctx.ok(true, "panel de financiamiento"); await ctx.wait(500);
+    }
+  },
   shot_empresa: { db: baseDb, options: { userId: "comp1" }, async run(ctx) { await appReady(ctx); ctx.ok(true, "interfaz abierta"); await ctx.wait(400); } },
   shot_startup: { db: baseDb, options: { userId: "own1" }, async run(ctx) { await appReady(ctx); ctx.ok(true, "interfaz abierta"); await ctx.wait(400); } },
   phase1_sectores_inversor: {
@@ -294,8 +507,7 @@ window.SCENARIOS = {
       ctx.$("#edit-startup").click();
       const form = ctx.$("#startup-profile-form");
       ctx.ok(form.elements.sector.value === "healthtech", "el sector de la startup se preselecciona por id");
-      ctx.ok(form.elements.isFundraising.checked, "la marca de financiamiento refleja la ronda abierta");
-      form.elements.isFundraising.checked = false;
+      ctx.ok(!form.elements.isFundraising, "el formulario de perfil ya no esconde la marca de financiamiento");
       form.elements.name.value = "Nébula Health 2";
       form.requestSubmit();
       await ctx.wait(200);
@@ -303,13 +515,7 @@ window.SCENARIOS = {
       ctx.ok(update, "se actualizó el perfil");
       const keys = Object.keys(update?.payload || {});
       ctx.ok(!["traction_score", "is_fundraising", "owner_id", "country", "sector"].some((k) => keys.includes(k)) && keys.includes("sector_id"), `la actualización no envía columnas protegidas (${keys.join(",")})`);
-      ctx.ok(ctx.db.funding_rounds.find((r) => r.id === "r1").status === "paused", "desmarcar pausa la ronda abierta (el historial se conserva)");
-      ctx.$("#edit-startup").click();
-      ctx.$("#startup-profile-form").elements.isFundraising.checked = true;
-      ctx.$("#startup-profile-form").requestSubmit();
-      await ctx.wait(200);
-      const open = ctx.db.funding_rounds.filter((r) => r.startup_id === "s1" && r.status === "open");
-      ctx.ok(open.length === 1 && ctx.db.funding_rounds.filter((r) => r.startup_id === "s1").length === 2, "marcar de nuevo abre una ronda nueva");
+      ctx.ok(ctx.db.funding_rounds.find((r) => r.id === "r1").status === "open", "guardar el perfil no toca las rondas");
     }
   },
   phase0_investor: {

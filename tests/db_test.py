@@ -76,6 +76,7 @@ def bootstrap(db):
       grant usage on schema storage to anon, authenticated, service_role;
       grant select, insert, update, delete on storage.objects to anon, authenticated, service_role;
       grant select on storage.buckets to anon, authenticated, service_role;
+      do $$ begin create publication supabase_realtime; exception when duplicate_object then null; end $$;
     """)
 
 
@@ -128,7 +129,7 @@ def run_all(db):
     check(db.one("select count(*) from subscriptions where status = 'free'") == 2, "todos los usuarios existentes quedan en plan Free")
     check(db.one("select count(*) from information_schema.columns where table_name = 'investor_preferences' and column_name in ('sectors','sector_expertise')") == 0, "investor_preferences ya no duplica sectores")
 
-    db.migrate(only=["004"])
+    db.migrate(only=["004", "005"])
 
     print("Alta de usuarios")
     adm = signup(db, "adm@x.cl", "admin", "Quiere Admin")
@@ -227,6 +228,36 @@ def run_all(db):
     check(status == "error", "los clientes no fabrican notificaciones")
     status, msg = db.as_user(inv, "update interests set status = 'matched' where investor_id = %s", (comp,))
     check(db.one("select status from interests where investor_id = %s", (comp,)) == "pending", "un tercero no cambia el estado de un interés ajeno")
+
+    print("Comunidad: seguidores y notificaciones")
+    notes = lambda uid, kind: db.one("select count(*) from notifications where user_id = %s and type = %s", (uid, kind))
+    check(notes(own, "follow") == 1 and db.one("select actor_id from notifications where type = 'follow'") == inv, "seguir crea una notificación para el dueño de la startup")
+    check(notes(own, "interest") == 1, "un interés crea una notificación para la startup")
+    status, rows = db.as_user(own, "select * from follower_counts(%s)", (sid,))
+    check(status == "ok" and rows == [(1, 1, 0)], f"follower_counts: 1 seguidor, 1 inversionista, 0 empresas ({rows})")
+    db.as_user(comp, "insert into follows (follower_id, startup_id) values (%s, %s)", (comp, sid))
+    check(db.as_user(inv, "select * from follower_counts(%s)", (sid,))[1] == [(2, 1, 1)], "el conteo separa inversionistas y empresas y lo ve cualquiera")
+    check(db.as_user(inv, "select count(*) from follows where follower_id <> %s", (inv,))[1] == [(0,)], "nadie lee quién más sigue (la lista no es pública)")
+    status, _ = db.as_user(own, "select * from follower_counts('00000000-0000-0000-0000-000000000000')")
+    check(status == "ok" and db.as_user(own, "select * from follower_counts('00000000-0000-0000-0000-000000000000')")[1] == [(0, 0, 0)], "un id inexistente devuelve ceros")
+    db.as_user(own, "update interests set status = 'matched' where investor_id = %s and startup_id = %s", (comp, sid))
+    check(notes(comp, "match") == 1 and db.one("select actor_id from notifications where type = 'match'") == own, "aceptar un interés notifica el match a quien lo envió")
+    db.as_user(own, "update funding_rounds set status = 'paused' where startup_id = %s and status = 'open'", (sid,))
+    check(notes(inv, "round_opened") == 0, "pausar una ronda no notifica")
+    db.as_user(own, "insert into funding_rounds (startup_id, status, stage, target_usd, ticket_min_usd, ticket_max_usd) values (%s, 'open', 'Seed', 900000, 50000, 100000)", (sid,))
+    check(notes(inv, "round_opened") == 1 and notes(comp, "round_opened") == 1, "abrir una ronda notifica a todos sus seguidores")
+    db.as_user(own, "update funding_rounds set status = 'paused' where startup_id = %s and status = 'open'", (sid,))
+    db.as_user(own, "update funding_rounds set status = 'open' where startup_id = %s and status = 'paused' and target_usd = 900000", (sid,))
+    check(notes(inv, "round_opened") == 2, "reabrir una ronda pausada también notifica")
+    db.as_user(inv, "update notifications set read_at = now() where user_id = %s", (own,))
+    check(db.one("select count(*) from notifications where user_id = %s and read_at is not null", (own,)) == 0, "nadie marca como leídas las notificaciones de otro")
+    db.as_user(inv, "update notifications set read_at = now() where user_id = %s", (inv,))
+    check(db.one("select count(*) from notifications where user_id = %s and read_at is null", (inv,)) == 0, "cada usuario marca las suyas como leídas")
+    status, _ = db.as_user(inv, "update notifications set type = 'match' where user_id = %s", (inv,))
+    check(status == "error", "solo read_at es editable en una notificación")
+    status, _ = db.as_user(inv, "select * from notifications where user_id = %s", (own,))
+    check(db.as_user(inv, "select count(*) from notifications where user_id = %s", (own,))[1] == [(0,)], "cada usuario solo lee sus notificaciones")
+    check(db.one("select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'notifications'") == 1, "notifications publicada en Realtime")
 
 
 def run_seed(db):

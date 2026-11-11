@@ -33,7 +33,7 @@
       .replaceAll(/src="(?!http)([^"]+\.js)"/g, 'src="../$1"')
       .replace('href="styles.css"', 'href="../styles.css"')
       .replace("</head>", `<script>
-        window.VENTUREA_CONFIG = { supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "k" };
+        window.VENTUREA_CONFIG = { supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "k", notificationPollMs: ${scenario.options.pollMs || 0} };
         window.supabase = { createClient: () => parent.__client };
       <\/script></head>`);
     window.__client = window.createMockSupabase(db, { ...scenario.options, log });

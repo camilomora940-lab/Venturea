@@ -77,7 +77,7 @@
             <div class="search-results" id="search-results" role="listbox" hidden></div>
           </div>
           <div class="topbar-actions">
-            <button class="icon-button" id="notification-button" aria-label="Notificaciones">♧<span class="notification-dot"></span></button>
+            <div class="bell-wrap"><button class="icon-button" id="notification-button" aria-label="Notificaciones" aria-haspopup="dialog" aria-expanded="false">♧<span class="notification-dot"></span><span class="badge-count" id="notif-badge" hidden>0</span></button><div class="notice-panel" id="notification-panel" role="dialog" aria-label="Notificaciones" hidden></div></div>
             <button class="top-avatar">MG</button>
           </div>
         </header>
@@ -117,7 +117,7 @@
                   <div class="tag-row" id="company-tags"></div>
                   <div class="company-metrics"><div><small>RONDA ACTUAL</small><strong id="company-round">Seed · USD 1.2M</strong></div><div><small>TRACCIÓN</small><strong id="company-traction">3.4x crecimiento</strong></div><div class="match-score"><small>COMPATIBILIDAD</small><strong id="company-fit">00% <span>✦</span></strong></div></div>
                   <div class="score-explanation"><div id="score-breakdown"></div><div class="score-reasons" id="score-reasons"></div><small id="score-note">Tu puntaje pondera sector (25%), etapa (20%), ticket (20%), mercado (15%), modelo (10%) y tracción (10%). La compatibilidad combina ambos puntajes; no predice inversión.</small></div>
-                  <div class="card-footer"><div class="founder"><span class="avatar founder-avatar" id="founder-avatar">CL</span><span><small>FUNDADORA</small><strong id="founder-name">Camila López</strong></span></div><div class="card-actions"><button class="pass-button" id="pass-button" aria-label="Pasar startup">×</button><button class="pitch-button" id="pitch-button" hidden>▶ Ver pitch</button><button class="info-button" id="info-button">Ver perfil <span>↗</span></button><button class="like-button" id="like-button" aria-label="Me interesa">♡</button></div></div>
+                  <div class="card-footer"><div class="founder"><span class="avatar founder-avatar" id="founder-avatar">CL</span><span><small>FUNDADORA</small><strong id="founder-name">Camila López</strong></span></div><div class="card-actions"><button class="secondary-button follow-button" id="follow-button" hidden>Seguir</button><button class="pass-button" id="pass-button" aria-label="Pasar startup">×</button><button class="pitch-button" id="pitch-button" hidden>▶ Ver pitch</button><button class="info-button" id="info-button">Ver perfil <span>↗</span></button><button class="like-button" id="like-button" aria-label="Me interesa">♡</button></div></div>
                 </div>
               </div>
               <div class="empty-state no-compatible-card" id="no-compatible-startups" hidden><span>⌕</span><h3 id="empty-title">No hay startups que cumplan tu tesis</h3><p id="empty-copy">Amplía tus sectores, etapas o rango de inversión para ver más opciones.</p><button class="secondary-button" id="empty-edit-filters">Editar filtros</button></div>
@@ -139,7 +139,10 @@
           <section class="view" id="view-updates">
             <div class="page-intro"><div class="eyebrow muted-eyebrow">EL PULSO DE TU PORTAFOLIO</div><h1>Actualizaciones<span class="heading-period">.</span></h1><p>Novedades de las startups que sigues, en un solo lugar.</p></div>
             <div class="updates-banner"><span class="updates-live">●</span><div><strong>Actualizaciones de la comunidad</strong><p>Novedades compartidas por startups chilenas.</p></div><span class="pro-badge">GRATIS</span></div>
+            <div class="chip-row" id="post-chips" role="group" aria-label="Filtrar por categoría"></div>
+            <div class="fund-toolbar"><select id="post-sector-filter" aria-label="Filtrar por sector"></select><label class="switch" id="post-following-label"><input type="checkbox" id="post-following-only" role="switch" /><span class="switch-track"></span><span>Solo de quienes sigo</span></label></div>
             <div class="update-list" id="update-list"></div>
+            <div class="load-more" id="update-more" hidden><button class="secondary-button" id="load-more-posts">Cargar más publicaciones</button></div>
           </section>
 
           <section class="view" id="view-funds">
@@ -171,17 +174,23 @@
 
           <section class="view" id="view-startup">
             <div class="page-intro page-intro-row"><div><div class="eyebrow muted-eyebrow">PRESENCIA QUE ABRE PUERTAS</div><h1>Tu startup<span class="heading-period">.</span></h1><p>Cuenta lo que estás construyendo y encuentra a quienes creen en ello.</p></div><button class="primary-button" id="startup-create-fund">＋ Abrir una ronda</button></div>
-            <div class="startup-dashboard"><div class="dashboard-profile"><div class="dashboard-cover"></div><div class="dashboard-company-logo">N</div><div class="dashboard-company-info"><span class="verified-pill">✓ PERFIL PÚBLICO</span><h2>Nébula Health</h2><p>Diagnóstico preventivo con IA · Santiago, Chile</p><div class="tag-row"><span class="tag">Healthtech</span><span class="tag">Inteligencia artificial</span><span class="tag">Seed</span></div><button class="secondary-button" id="edit-startup">Editar perfil</button> <button class="secondary-button" data-upload="avatar">Cambiar logo</button> <button class="secondary-button" data-upload="banner">Cambiar banner</button> <button class="secondary-button" id="view-own-profile">Ver perfil público</button></div></div><div class="dashboard-side"><div class="dashboard-stat"><span>Vistas de perfil</span><strong>—</strong><small>Métrica no disponible aún</small></div><div class="dashboard-stat"><span>Inversores interesados</span><strong id="interested-count">0</strong><small>Solicitudes recibidas</small></div><div class="dashboard-stat"><span>Tu perfil</span><strong id="round-status">Sin publicar</strong><small>Visible para inversores</small></div></div></div>
+            <div class="startup-dashboard"><div class="dashboard-profile"><div class="dashboard-cover"></div><div class="dashboard-company-logo">N</div><div class="dashboard-company-info"><span class="verified-pill">✓ PERFIL PÚBLICO</span><h2>Nébula Health</h2><p>Diagnóstico preventivo con IA · Santiago, Chile</p><div class="tag-row"><span class="tag">Healthtech</span><span class="tag">Inteligencia artificial</span><span class="tag">Seed</span></div><button class="secondary-button" id="edit-startup">Editar perfil</button> <button class="secondary-button" data-upload="avatar">Cambiar logo</button> <button class="secondary-button" data-upload="banner">Cambiar banner</button> <button class="secondary-button" id="view-own-profile">Ver perfil público</button></div></div><div class="dashboard-side"><div class="dashboard-stat"><span>Seguidores inversionistas</span><strong id="followers-investors">0</strong><small>Siguen tu startup</small></div><div class="dashboard-stat"><span>Seguidores empresas</span><strong id="followers-companies">0</strong><small>Siguen tu startup</small></div><div class="dashboard-stat"><span>Inversores interesados</span><strong id="interested-count">0</strong><small>Solicitudes recibidas</small></div><div class="dashboard-stat"><span>Tu perfil</span><strong id="round-status">Sin publicar</strong><small>Visible para inversores</small></div></div></div>
+            <div class="section-heading startup-update-heading"><div><div class="eyebrow muted-eyebrow">TÚ DECIDES CUÁNDO</div><h2>Buscando financiamiento</h2></div></div>
+            <div class="funding-panel" id="funding-panel">
+              <div class="funding-head"><label class="switch"><input type="checkbox" id="funding-switch" role="switch" /><span class="switch-track"></span><span id="funding-switch-label">No</span></label><div class="funding-status" id="funding-status">No estás buscando financiamiento.</div><div class="funding-actions" id="funding-actions"></div></div>
+              <div class="funding-history" id="funding-history"></div>
+            </div>
             <div class="section-heading startup-update-heading"><div><div class="eyebrow muted-eyebrow">SOLICITUDES DE CONEXIÓN</div><h2>Intereses de inversores</h2></div></div>
             <div class="request-list" id="startup-requests"></div>
             <div class="section-heading startup-update-heading"><div><div class="eyebrow muted-eyebrow">COMPARTE TU PROGRESO</div><h2>Actualizaciones para inversores</h2></div></div>
-            <div class="compose-update"><div class="compose-avatar">N</div><div class="compose-content"><textarea id="update-input" rows="2" placeholder="¿Qué avances quieres compartir?"></textarea><div class="compose-footer"><span>✦ Comparte hitos, métricas o novedades del equipo.</span><button class="primary-button small-button" id="publish-update">Publicar actualización</button></div></div></div>
+            <div class="compose-update"><div class="compose-avatar">N</div><div class="compose-content"><textarea id="update-input" rows="2" placeholder="¿Qué avances quieres compartir?"></textarea><div class="compose-footer"><span>✦ Comparte hitos, métricas o novedades del equipo.</span><select id="post-category" required aria-label="Categoría de la publicación"><option value="">Elige una categoría</option></select><button class="primary-button small-button" id="publish-update">Publicar actualización</button></div></div></div>
             <div class="founder-updates" id="founder-updates"></div>
           </section>
         </div>
       </main>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="notice-stack" id="notice-stack" aria-live="polite"></div>
     <div class="modal-backdrop" id="fund-modal" aria-hidden="true">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <button class="modal-close" id="close-fund-modal" aria-label="Cerrar">×</button>
@@ -222,7 +231,7 @@
           <label>Descripción<textarea required name="description" rows="3" minlength="20" maxlength="1000"></textarea></label>
           <label>Modelo de negocio<select name="businessModel"><option>B2B</option><option>B2B2C</option><option>B2C</option></select></label>
           <label>Video pitch (enlace de YouTube, Vimeo o Loom)<input name="pitchVideo" type="url" maxlength="300" placeholder="https://www.youtube.com/watch?v=..." /><span class="field-hint">Ideal: 60–120 segundos. Cuenta el problema, tu solución, tu tracción y lo que pides.</span></label>
-          <label class="fundraising-toggle"><input name="isFundraising" type="checkbox" /> Estoy buscando inversión ahora; mostrar mi ronda en “Rondas abiertas”.</label>
+
           <p class="auth-error" id="startup-profile-error" role="alert" hidden></p>
           <button class="primary-button modal-submit" type="submit">Guardar perfil y aparecer a inversores <span>→</span></button>
         </form>
@@ -273,6 +282,20 @@
         <button class="modal-close" id="close-pitch-modal" aria-label="Cerrar">×</button>
         <div class="modal-eyebrow">VIDEO PITCH</div><h2 id="pitch-title">Pitch<span class="heading-period">.</span></h2>
         <div class="video-frame"><iframe id="pitch-frame" title="Video pitch" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" allow="autoplay; fullscreen; picture-in-picture"></iframe></div>
+      </div>
+    </div>
+    <div class="modal-backdrop" id="round-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="round-modal-title">
+        <button class="modal-close" id="close-round-modal" aria-label="Cerrar">×</button>
+        <div class="modal-eyebrow">HAZ CRECER LO QUE ESTÁS CONSTRUYENDO</div><h2 id="round-modal-title">Abre una ronda<span class="heading-period">.</span></h2><p class="modal-copy">Tus seguidores recibirán un aviso y aparecerás en “Rondas abiertas”. Puedes pausarla o cerrarla cuando quieras.</p>
+        <form id="round-form">
+          <div class="form-row"><label>Etapa<select name="stage"><option>Pre-seed</option><option>Seed</option><option>Serie A</option></select></label><label>Objetivo (USD)<input required name="target" type="number" min="1000" /></label></div>
+          <div class="form-row"><label>Ticket mínimo (USD)<input required name="ticketMin" type="number" min="1" /></label><label>Ticket máximo (USD)<input required name="ticketMax" type="number" min="1" /></label></div>
+          <div class="form-row"><label>Capital comprometido (%)<input name="committed" type="number" min="0" max="100" value="0" /></label><label>Fecha de cierre (opcional)<input name="closesAt" type="date" /></label></div>
+          <p class="form-disclaimer">Publicar una ronda no implica una oferta pública de valores ni garantiza financiación.</p>
+          <p class="auth-error" id="round-error" role="alert" hidden></p>
+          <button class="primary-button modal-submit" type="submit">Abrir ronda <span>→</span></button>
+        </form>
       </div>
     </div>
     <script src="supabase-config.js"></script>

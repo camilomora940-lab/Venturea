@@ -11,6 +11,9 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   let startupProfile;
   let companyProfile = null;
   let companySectors = [];
+  let postCategories = [];
+  let followingIds = new Set();
+  let fundingRounds = [];
   let investorPreferences;
   let workspaceUserId = null;
   let workspaceController;
@@ -280,6 +283,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       card.hidden = true;
       empty.hidden = false;
       $("#card-number").textContent = "00 / 00";
+      $("#follow-button").hidden = true;
       return;
     }
     card.hidden = false;
@@ -310,8 +314,9 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     ].map((reason) => `<span>${reason}</span>`).join("");
     $("#founder-name").textContent = startup.founder_name;
     $("#founder-avatar").textContent = startup.founder_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
-    $("#company-tags").innerHTML = [sectorName(startup.sector_id), startup.business_model, startup.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
+    $("#company-tags").innerHTML = [sectorName(startup.sector_id), startup.business_model, startup.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("") + (startup.round ? '<span class="tag funding">Buscando financiamiento</span>' : "");
     $("#bookmark-button").hidden = true;
+    renderFollowButtons();
   }
 
   async function loadInterests(target = "#match-list") {
@@ -367,31 +372,6 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     show(requests.map((request) => `<article class="request-item"><div><strong>${escapeHtml(names.get(request.investor_id) || "Inversor/a")} <span class="tag">${escapeHtml(ROLE_LABELS[roles.get(request.investor_id)] || "")}</span></strong><small>${request.status === "matched" ? "Match mutuo" : request.status === "rejected" ? "No aceptado" : "Quiere conocer tu startup"}</small></div>${request.status === "pending" ? `<button data-respond="${request.id}" data-status="matched">Aceptar match</button><button data-respond="${request.id}" data-status="rejected">Ahora no</button>` : ""}</article>`).join(""));
   }
 
-  async function loadUpdates() {
-    const { data, error } = await supabaseClient
-      .from("posts").select("*").order("created_at", { ascending: false }).limit(50);
-    if (error) throw error;
-    const posts = data || [];
-    if (!posts.length) {
-      $("#update-list").innerHTML = '<div class="empty-state"><span>◷</span><h3>Sin actualizaciones todavía</h3><p>Las novedades de startups chilenas aparecerán aquí.</p></div>';
-      return;
-    }
-    const ids = [...new Set(posts.map((post) => post.startup_id))];
-    const { data: companies, error: companiesError } = await supabaseClient.from("startup_profiles").select("id, name, sector_id, logo_url").in("id", ids);
-    if (companiesError) throw companiesError;
-    const lookup = new Map(companies.map((company) => [company.id, company]));
-    const renderedPosts = posts.map((post) => {
-      const company = lookup.get(post.startup_id);
-      if (!company) return "";
-      return `<article class="update-item"><span class="update-logo" data-bg="${escapeHtml(company.logo_url || "")}">${company.logo_url ? "" : escapeHtml(company.name.slice(0, 1))}</span><div class="update-copy"><strong>${escapeHtml(company.name)} <span class="tag">${escapeHtml(sectorName(company.sector_id))}</span></strong><small>${new Date(post.created_at).toLocaleString("es-CL")}</small><p>${escapeHtml(post.content)}</p></div></article>`;
-    }).join("");
-    $("#update-list").innerHTML = renderedPosts;
-    paintDataBg($("#update-list"));
-    if (profile.role === "startup" && startupProfile) {
-      $("#founder-updates").innerHTML = posts.filter((post) => post.startup_id === startupProfile.id).map((post) => `<article class="founder-update-card"><strong>Actualización para inversores</strong><small>${new Date(post.created_at).toLocaleString("es-CL")}</small><p>${escapeHtml(post.content)}</p></article>`).join("");
-    }
-  }
-
   function renderRemoteFunds() {
     const sector = $("#fund-filter").value;
     const stage = $("#stage-filter").value;
@@ -407,7 +387,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     for (const [field, key] of Object.entries({
       name: "name", city: "city", sector: "sector_id", stage: "stage", target: "target_amount_usd",
       checkMin: "preferred_check_min_usd", checkMax: "preferred_check_max_usd",
-      description: "description", businessModel: "business_model", isFundraising: "is_fundraising", pitchVideo: "pitch_video_url"
+      description: "description", businessModel: "business_model", pitchVideo: "pitch_video_url"
     })) {
       if (startupProfile[key] !== undefined) {
         if (form.elements[field].type === "checkbox") form.elements[field].checked = startupProfile[key];
@@ -427,11 +407,13 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     $("#view-startup .dashboard-company-info h2").textContent = startupProfile.name;
     $("#view-startup .dashboard-company-info > p").textContent = `${startupProfile.description} · ${startupProfile.city}, Chile`;
     $("#view-startup .dashboard-company-info .tag-row").innerHTML = [sectorName(startupProfile.sector_id), startupProfile.business_model, startupProfile.stage].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
-    $("#round-status").textContent = startupProfile.is_fundraising ? "Ronda abierta" : "Perfil publicado";
     $("#startup-profile-form").elements.name.value = startupProfile.name;
     $("#startup-profile-form").elements.city.value = startupProfile.city;
     fillStartupProfileForm();
     loadRequests().catch((error) => reportFailure("No pudimos cargar las solicitudes de interés", error));
+    loadFundingRounds().catch((error) => reportFailure("No pudimos cargar tus rondas", error));
+    loadOwnPosts().catch((error) => reportFailure("No pudimos cargar tus publicaciones", error));
+    loadFollowerStats().catch((error) => reportFailure("No pudimos cargar tus seguidores", error));
   }
 
   async function loadWorkspace() {
@@ -443,6 +425,12 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     try {
     profile = await loadProfile(user);
     await loadSectors();
+    Object.assign(postsState, { category: "all", sector: "all", followingOnly: false, offset: 0 });
+    followingIds = new Set();
+    fundingRounds = [];
+    await loadPostCategories();
+    $("#post-following-only").checked = false;
+    $("#post-following-label").hidden = !["investor", "company"].includes(profile.role);
     startupProfile = null;
     companyProfile = null;
     companySectors = [];
@@ -454,7 +442,9 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       const link = event.target.closest("[data-view]");
       if (link) switchRemoteView(link.dataset.view);
     }, { signal });
-    $("#notification-button").addEventListener("click", () => switchRemoteView("updates"), { signal });
+    $("#notification-button").addEventListener("click", toggleNotificationPanel, { signal });
+    $("#notification-panel").addEventListener("click", handleNoticeClick, { signal });
+    $("#notice-stack").addEventListener("click", handleNoticeClick, { signal });
     $("#profile-button").addEventListener("click", toggleProfileMenu, { signal });
     $("#profile-menu").addEventListener("click", handleProfileMenu, { signal });
     $(".top-avatar").addEventListener("click", () => openOwnProfile(), { signal });
@@ -471,9 +461,25 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     }, { signal });
     $("#view-own-profile").addEventListener("click", openOwnProfile, { signal });
     $("#view-own-profile-company").addEventListener("click", openOwnProfile, { signal });
+    $("#post-chips").addEventListener("click", (event) => {
+      const chip = event.target.closest("[data-post-cat]");
+      if (!chip) return;
+      postsState.category = chip.dataset.postCat;
+      $$("#post-chips .chip").forEach((item) => { item.classList.toggle("active", item === chip); item.setAttribute("aria-pressed", String(item === chip)); });
+      reloadUpdates();
+    }, { signal });
+    $("#post-sector-filter").addEventListener("change", (event) => { postsState.sector = event.target.value; reloadUpdates(); }, { signal });
+    $("#post-following-only").addEventListener("change", (event) => { postsState.followingOnly = event.target.checked; reloadUpdates(); }, { signal });
+    $("#load-more-posts").addEventListener("click", () => loadUpdates({ append: true }).catch((error) => reportFailure("No pudimos cargar más publicaciones", error)), { signal });
+    $("#follow-button").addEventListener("click", () => { if (rankedStartups[selectedIndex]) toggleFollow(rankedStartups[selectedIndex].id); }, { signal });
+    $("#funding-switch").addEventListener("change", handleFundingSwitch, { signal });
+    $("#funding-panel").addEventListener("click", handleFundingClick, { signal });
+    $("#round-form").addEventListener("submit", saveRound, { signal });
+    startNotifications(signal);
     if (profile.role === "investor") {
       selectedIndex = 0;
       await loadInvestorPreferences();
+      await refreshFollowIds();
       await loadStartups();
       renderRemoteCard();
       $("#investor-sector-pills").innerHTML = investorPreferences.sectors.map((sector) => `<span>${escapeHtml(sectorName(sector))}</span>`).join("") || "<span>Sin sectores</span>";
@@ -499,8 +505,8 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       startupProfile = data;
       updateAccountLabels();
       switchRemoteView("startup");
-      $("#open-fund-modal").addEventListener("click", openStartupEditor, { signal });
-      $("#startup-create-fund").addEventListener("click", openStartupEditor, { signal });
+      $("#open-fund-modal").addEventListener("click", openRoundForm, { signal });
+      $("#startup-create-fund").addEventListener("click", openRoundForm, { signal });
       $("#edit-startup").addEventListener("click", openStartupEditor, { signal });
       $("#startup-profile-form").addEventListener("submit", saveStartupProfile, { signal });
       $("#publish-update").addEventListener("click", publishUpdate, { signal });
@@ -512,6 +518,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       const { data: tagged, error: taggedError } = await supabaseClient.from("profile_sectors").select("sector_id").eq("profile_id", user.id).eq("kind", "interest");
       if (taggedError) throw taggedError;
       companySectors = (tagged || []).map((row) => row.sector_id);
+      await refreshFollowIds();
       updateAccountLabels();
       selectedIndex = 0;
       await loadStartups();
@@ -555,6 +562,10 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       $("#profile-button").setAttribute("aria-expanded", "false");
     }
     if (!event.target.closest(".search-wrap")) $("#search-results").hidden = true;
+    if (!event.target.closest(".bell-wrap")) {
+      $("#notification-panel").hidden = true;
+      $("#notification-button").setAttribute("aria-expanded", "false");
+    }
   }
 
 
@@ -585,6 +596,8 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     $("#profile-menu").hidden = true;
     $("#profile-button").setAttribute("aria-expanded", "false");
     $("#search-results").hidden = true;
+    $("#notification-panel").hidden = true;
+    $("#notification-button").setAttribute("aria-expanded", "false");
     $$(".modal-backdrop.open").forEach((modal) => {
       const forced = (modal.id === "startup-profile-modal" && !startupProfile) || (modal.id === "company-profile-modal" && !companyProfile);
       if (!forced) setModal(modal, false);
@@ -925,8 +938,8 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   // ------------------------------------------------------------------
   let openProfileRef = null;
 
-  function profileShell({ bannerUrl, photoUrl, initials, title, subtitle, tags = [], actions = "", body = "" }) {
-    return `<article class="profile-card"><div class="profile-banner" data-bg="${escapeHtml(bannerUrl || "")}"></div><div class="profile-head"><div class="profile-photo" data-bg="${escapeHtml(photoUrl || "")}">${photoUrl ? "" : escapeHtml(initials)}</div><div class="profile-title"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(subtitle)}</p><div class="tag-row">${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div></div><div class="profile-actions">${actions}</div></div><div class="profile-body">${body}</div></article>`;
+  function profileShell({ bannerUrl, photoUrl, initials, title, subtitle, tags = [], meta = "", actions = "", body = "" }) {
+    return `<article class="profile-card"><div class="profile-banner" data-bg="${escapeHtml(bannerUrl || "")}"></div><div class="profile-head"><div class="profile-photo" data-bg="${escapeHtml(photoUrl || "")}">${photoUrl ? "" : escapeHtml(initials)}</div><div class="profile-title"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(subtitle)}</p><div class="tag-row">${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>${meta}</div><div class="profile-actions">${actions}</div></div><div class="profile-body">${body}</div></article>`;
   }
   const profileSection = (title, content) => `<section class="profile-section"><h3>${title}</h3>${content}</section>`;
   const postCards = (posts, author) => posts.length
@@ -940,7 +953,8 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     page.innerHTML = '<p class="search-empty">Cargando perfil…</p>';
     try {
       page.innerHTML = await buildProfile(kind, id);
-      $$("[data-bg]", page).forEach((element) => { element.style.backgroundImage = cssUrl(element.dataset.bg); });
+      paintDataBg(page);
+      renderFollowButtons();
     } catch (error) {
       console.error("No pudimos abrir el perfil:", error);
       page.innerHTML = '<div class="empty-state"><span>⌕</span><h3>No pudimos abrir este perfil</h3><p>Puede que ya no esté publicado.</p></div>';
@@ -960,6 +974,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       ]);
       const failed = firstError(owner, open, posts);
       if (failed) throw failed;
+      const counts = await followerCounts(id);
       const round = open.data;
       const own = startup.owner_id === user.id;
       const embed = startup.pitch_video_url ? window.VentureaMedia.toEmbedUrl(startup.pitch_video_url) : null;
@@ -968,7 +983,9 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
         bannerUrl: startup.banner_url, photoUrl: startup.logo_url, initials: startup.name.slice(0, 1).toUpperCase(),
         title: startup.name, subtitle: `${startup.city}, Chile · Fundador/a: ${owner.data?.full_name || "Equipo fundador"}`,
         tags: [sectorName(startup.sector_id), startup.business_model, startup.stage, ...(round ? ["Buscando financiamiento"] : [])],
+        meta: followerLine(counts),
         actions: (own ? '<button class="secondary-button" data-edit-own>Editar perfil</button><button class="secondary-button" data-upload="avatar">Cambiar logo</button><button class="secondary-button" data-upload="banner">Cambiar banner</button>' : "") +
+          (canFollow() && !own ? `<button class="secondary-button" data-follow="${startup.id}">Seguir</button>` : "") +
           (canInterest ? `<button class="primary-button small-button" data-profile-interest="${startup.id}">♡ Me interesa</button>` : ""),
         body: profileSection("Acerca de", `<p>${escapeHtml(startup.description)}</p>`) +
           (embed ? profileSection("Video pitch", `<div class="video-frame"><iframe title="Video pitch de ${escapeHtml(startup.name)}" src="${embed}" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"></iframe></div>`) : "") +
@@ -1055,6 +1072,405 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     await loadInterests();
   }
 
+
+  // ------------------------------------------------------------------
+  // Publicaciones por categoría (filtro en la consulta, con paginación)
+  // ------------------------------------------------------------------
+  const POSTS_PAGE = 20;
+  const postsState = { category: "all", sector: "all", followingOnly: false, offset: 0, request: 0 };
+  const categoryName = (id) => postCategories.find((category) => category.id === id)?.name ?? id;
+  const categoryTag = (id) => `<span class="tag cat-tag cat-${Math.max(0, postCategories.findIndex((category) => category.id === id))}">${escapeHtml(categoryName(id))}</span>`;
+  const canFollow = () => ["investor", "company"].includes(profile.role);
+
+  async function loadPostCategories() {
+    const { data, error } = await supabaseClient.from("post_categories").select("id, name, sort_order").order("sort_order");
+    if (error) throw error;
+    postCategories = data || [];
+    $("#post-chips").innerHTML = [["all", "Todas"], ...postCategories.map((category) => [category.id, category.name])].map(([id, label]) =>
+      `<button class="chip${id === postsState.category ? " active" : ""}" data-post-cat="${id}" aria-pressed="${id === postsState.category}">${escapeHtml(label)}</button>`).join("");
+    $("#post-category").innerHTML = `<option value="">Elige una categoría</option>${postCategories.map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`).join("")}`;
+    $("#post-sector-filter").innerHTML = sectorOptions("all", true);
+  }
+
+  async function loadUpdates({ append = false } = {}) {
+    const request = ++postsState.request; // descarta respuestas viejas si el usuario cambia de filtro rápido
+    if (!append) postsState.offset = 0;
+    const list = $("#update-list");
+    const filtered = postsState.category !== "all" || postsState.sector !== "all" || postsState.followingOnly;
+    const empty = filtered
+      ? '<div class="empty-state"><span>◷</span><h3>Sin publicaciones con estos filtros</h3><p>Prueba con otra categoría o sector.</p></div>'
+      : '<div class="empty-state"><span>◷</span><h3>Sin actualizaciones todavía</h3><p>Las novedades de startups chilenas aparecerán aquí.</p></div>';
+    let query = supabaseClient.from("posts").select("*").order("created_at", { ascending: false });
+    if (postsState.category !== "all") query = query.eq("category", postsState.category);
+    let allowed = null; // startups permitidas por los filtros de sector y "solo de quienes sigo"
+    if (postsState.sector !== "all") allowed = startups.filter((startup) => startup.sector_id === postsState.sector).map((startup) => startup.id);
+    if (postsState.followingOnly) allowed = (allowed ?? [...followingIds]).filter((id) => followingIds.has(id));
+    if (allowed && !allowed.length) {
+      list.innerHTML = empty;
+      $("#update-more").hidden = true;
+      return;
+    }
+    if (allowed) query = query.in("startup_id", allowed);
+    const { data, error } = await query.range(postsState.offset, postsState.offset + POSTS_PAGE); // una fila extra indica que hay más
+    if (error) throw error;
+    const page = (data || []).slice(0, POSTS_PAGE);
+    const ids = [...new Set(page.map((post) => post.startup_id))];
+    const { data: companies, error: companiesError } = ids.length
+      ? await supabaseClient.from("startup_profiles").select("id, name, sector_id, logo_url").in("id", ids)
+      : { data: [] };
+    if (companiesError) throw companiesError;
+    if (request !== postsState.request) return;
+    postsState.offset += page.length;
+    $("#update-more").hidden = (data || []).length <= POSTS_PAGE;
+    if (!page.length && !append) {
+      list.innerHTML = empty;
+      return;
+    }
+    const lookup = new Map(companies.map((company) => [company.id, company]));
+    const html = page.map((post) => {
+      const company = lookup.get(post.startup_id);
+      if (!company) return "";
+      return `<article class="update-item"><span class="update-logo" data-bg="${escapeHtml(company.logo_url || "")}">${company.logo_url ? "" : escapeHtml(company.name.slice(0, 1))}</span><div class="update-copy"><strong>${escapeHtml(company.name)} <span class="tag">${escapeHtml(sectorName(company.sector_id))}</span> ${categoryTag(post.category)}</strong><small>${new Date(post.created_at).toLocaleString("es-CL")}</small><p>${escapeHtml(post.content)}</p></div></article>`;
+    }).join("");
+    if (append) list.insertAdjacentHTML("beforeend", html);
+    else list.innerHTML = html;
+    paintDataBg(list);
+  }
+
+  const reloadUpdates = () => loadUpdates().catch((error) => reportFailure("No pudimos cargar las actualizaciones", error));
+
+  async function loadOwnPosts() {
+    if (!startupProfile) return;
+    const { data, error } = await supabaseClient.from("posts").select("*").eq("startup_id", startupProfile.id).order("created_at", { ascending: false }).limit(20);
+    if (error) throw error;
+    $("#founder-updates").innerHTML = (data || []).map((post) => `<article class="founder-update-card"><strong>${categoryTag(post.category)}</strong><small>${new Date(post.created_at).toLocaleString("es-CL")}</small><p>${escapeHtml(post.content)}</p></article>`).join("");
+  }
+
+  // ------------------------------------------------------------------
+  // Buscar financiamiento: rondas que la startup abre, pausa y cierra cuando quiere
+  // ------------------------------------------------------------------
+  const ROUND_STATUS = { draft: "Borrador", open: "Abierta", paused: "Pausada", closed: "Cerrada" };
+
+  async function loadFundingRounds() {
+    if (!startupProfile) return;
+    const { data, error } = await supabaseClient.from("funding_rounds").select("*").eq("startup_id", startupProfile.id).order("created_at", { ascending: false });
+    if (error) throw error;
+    fundingRounds = data || [];
+    renderFundingPanel();
+  }
+
+  function renderFundingPanel() {
+    const open = fundingRounds.find((round) => round.status === "open");
+    const paused = fundingRounds.find((round) => round.status === "paused");
+    $("#funding-switch").checked = Boolean(open);
+    setText("#funding-switch-label", open ? "Sí" : "No");
+    setText("#round-status", open ? "Ronda abierta" : paused ? "Ronda pausada" : "Perfil publicado");
+    $("#funding-status").textContent = open
+      ? `Ronda abierta · ${open.stage} · objetivo ${money(open.target_usd)} · ticket ${money(open.ticket_min_usd)}–${money(open.ticket_max_usd)}`
+      : paused ? `Ronda pausada · ${paused.stage} · objetivo ${money(paused.target_usd)}` : "No estás buscando financiamiento.";
+    $("#funding-actions").innerHTML = open
+      ? `<button class="secondary-button" data-round-action="paused" data-round-id="${open.id}">Pausar</button><button class="secondary-button" data-round-action="closed" data-round-id="${open.id}">Cerrar ronda</button>`
+      : paused
+        ? `<button class="secondary-button" data-round-action="open" data-round-id="${paused.id}">Reabrir</button><button class="secondary-button" data-round-action="closed" data-round-id="${paused.id}">Cerrar ronda</button><button class="secondary-button" data-open-round-form>Abrir otra ronda</button>`
+        : '<button class="secondary-button" data-open-round-form>Abrir una ronda</button>';
+    $("#funding-history").innerHTML = fundingRounds.length
+      ? fundingRounds.map((round) => `<div class="funding-row"><span class="tag round-${round.status}">${ROUND_STATUS[round.status]}</span><strong>${escapeHtml(round.stage)} · ${escapeHtml(money(round.target_usd))}</strong><small>Ticket ${escapeHtml(money(round.ticket_min_usd))}–${escapeHtml(money(round.ticket_max_usd))} · creada el ${new Date(round.created_at).toLocaleDateString("es-CL")}</small></div>`).join("")
+      : "";
+  }
+
+  function openRoundForm() {
+    if (!startupProfile) return openStartupEditor();
+    const form = $("#round-form");
+    form.elements.stage.value = startupProfile.stage;
+    form.elements.target.value = startupProfile.target_amount_usd;
+    form.elements.ticketMin.value = startupProfile.preferred_check_min_usd;
+    form.elements.ticketMax.value = startupProfile.preferred_check_max_usd;
+    form.elements.committed.value = 0;
+    form.elements.closesAt.value = "";
+    setError($("#round-error"), "");
+    setModal($("#round-modal"), true);
+  }
+
+  async function refreshAfterRoundChange() {
+    await loadFundingRounds();
+    await loadStartups();
+  }
+
+  async function saveRound(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = {
+      startup_id: startupProfile.id, status: "open", stage: form.elements.stage.value,
+      target_usd: Number(form.elements.target.value), ticket_min_usd: Number(form.elements.ticketMin.value), ticket_max_usd: Number(form.elements.ticketMax.value),
+      committed_pct: Number(form.elements.committed.value || 0), opens_at: new Date().toISOString(),
+      closes_at: form.elements.closesAt.value ? new Date(`${form.elements.closesAt.value}T23:59:59`).toISOString() : null
+    };
+    const errorBox = $("#round-error");
+    if (values.ticket_max_usd < values.ticket_min_usd) return setError(errorBox, "El ticket máximo debe ser igual o mayor que el mínimo.");
+    if (values.committed_pct < 0 || values.committed_pct > 100) return setError(errorBox, "El capital comprometido debe estar entre 0 % y 100 %.");
+    if (fundingRounds.some((round) => round.status === "open")) return setError(errorBox, "Ya tienes una ronda abierta. Pausa o ciérrala antes de abrir otra.");
+    const { error } = await supabaseClient.from("funding_rounds").insert(values);
+    if (error) {
+      console.error("No pudimos abrir la ronda:", error);
+      return setError(errorBox, error.message);
+    }
+    setModal($("#round-modal"), false);
+    await refreshAfterRoundChange();
+    notify("Ronda abierta. Tus seguidores recibirán un aviso.");
+  }
+
+  async function setRoundStatus(id, status) {
+    const { error } = await supabaseClient.from("funding_rounds").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) {
+      await loadFundingRounds(); // devuelve el interruptor a su estado real
+      return reportFailure("No pudimos actualizar la ronda", error);
+    }
+    await refreshAfterRoundChange();
+    notify({ open: "Ronda reabierta.", paused: "Ronda pausada.", closed: "Ronda cerrada." }[status]);
+  }
+
+  function handleFundingSwitch(event) {
+    const input = event.currentTarget;
+    if (input.checked) {
+      input.checked = false; // se enciende recién cuando la ronda queda guardada
+      return openRoundForm();
+    }
+    const open = fundingRounds.find((round) => round.status === "open");
+    if (open) setRoundStatus(open.id, "paused");
+  }
+
+  function handleFundingClick(event) {
+    if (event.target.closest("[data-open-round-form]")) return openRoundForm();
+    const action = event.target.closest("[data-round-action]");
+    if (action) setRoundStatus(action.dataset.roundId, action.dataset.roundAction);
+  }
+
+  // ------------------------------------------------------------------
+  // Seguidores: botón Seguir y conteo separado entre inversionistas y empresas
+  // ------------------------------------------------------------------
+  async function refreshFollowIds() {
+    const { data, error } = await supabaseClient.from("follows").select("startup_id").eq("follower_id", user.id);
+    if (error) throw error;
+    followingIds = new Set((data || []).map((row) => row.startup_id));
+  }
+
+  function renderFollowButtons() {
+    const label = (id) => (followingIds.has(id) ? "Siguiendo ✓" : "Seguir");
+    const current = rankedStartups[selectedIndex];
+    const button = $("#follow-button");
+    button.hidden = !canFollow() || !current;
+    if (current) {
+      button.textContent = label(current.id);
+      button.setAttribute("aria-pressed", String(followingIds.has(current.id)));
+    }
+    $$("[data-follow]").forEach((element) => {
+      element.textContent = label(element.dataset.follow);
+      element.setAttribute("aria-pressed", String(followingIds.has(element.dataset.follow)));
+    });
+  }
+
+  async function toggleFollow(startupId) {
+    if (!canFollow()) return;
+    const following = followingIds.has(startupId);
+    const { error } = following
+      ? await supabaseClient.from("follows").delete().eq("follower_id", user.id).eq("startup_id", startupId)
+      : await supabaseClient.from("follows").insert({ follower_id: user.id, startup_id: startupId });
+    if (error && error.code !== "23505") return reportFailure(following ? "No pudimos dejar de seguir" : "No pudimos seguir", error);
+    if (following) followingIds.delete(startupId);
+    else followingIds.add(startupId);
+    renderFollowButtons();
+    notify(`${following ? "Dejaste de seguir a" : "Ahora sigues a"} ${startups.find((startup) => startup.id === startupId)?.name ?? "la startup"}.`);
+    if ($("#view-profile").classList.contains("active") && openProfileRef?.kind === "startup" && openProfileRef.id === startupId) {
+      followerCounts(startupId).then((counts) => { const line = $("#follower-line"); if (line) line.outerHTML = followerLine(counts); }).catch(() => {});
+    }
+    if (profile.role === "company") loadFollowing().catch((failure) => reportFailure("No pudimos actualizar tus seguidos", failure));
+  }
+
+  async function followerCounts(startupId) {
+    const { data, error } = await supabaseClient.rpc("follower_counts", { p_startup_id: startupId });
+    if (error) throw error;
+    const row = (Array.isArray(data) ? data[0] : data) || {};
+    return { total: Number(row.total || 0), investors: Number(row.investors || 0), companies: Number(row.companies || 0) };
+  }
+  const followerLine = (counts) => `<p class="follower-line" id="follower-line"><strong>${counts.total}</strong> seguidores · <span class="role-investor">${counts.investors} inversionistas</span> · <span class="role-company">${counts.companies} empresas</span></p>`;
+
+  async function loadFollowerStats() {
+    if (!startupProfile) return;
+    const counts = await followerCounts(startupProfile.id);
+    setText("#followers-investors", counts.investors);
+    setText("#followers-companies", counts.companies);
+  }
+
+  // ------------------------------------------------------------------
+  // Notificaciones: campana, historial, aviso emergente y Realtime (con consulta cada 60 s si falla)
+  // ------------------------------------------------------------------
+  const notifications = { items: [], unread: 0, seen: new Set(), channel: null, pollTimer: null, guardTimer: null, subscribed: false };
+  const NOTIFICATION_ROLE = { investor: "inversionista", company: "empresa", startup: "startup" };
+
+  async function notificationContext(list) {
+    const actorIds = [...new Set(list.map((item) => item.actor_id).filter(Boolean))];
+    const entityIds = [...new Set(list.map((item) => item.entity_id).filter(Boolean))];
+    const [actors, entities] = await Promise.all([
+      actorIds.length ? supabaseClient.from("profiles").select("id, full_name, role, avatar_url").in("id", actorIds) : { data: [] },
+      entityIds.length ? supabaseClient.from("startup_profiles").select("id, name").in("id", entityIds) : { data: [] }
+    ]);
+    const failed = firstError(actors, entities);
+    if (failed) throw failed;
+    return { actors: new Map(actors.data.map((row) => [row.id, row])), entities: new Map(entities.data.map((row) => [row.id, row])) };
+  }
+
+  function describeNotification(item, context) {
+    const actor = context.actors.get(item.actor_id);
+    const entity = context.entities.get(item.entity_id);
+    const who = actor ? `${actor.full_name} (${NOTIFICATION_ROLE[actor.role] || "usuario"})` : "Alguien";
+    const startupName = entity?.name ?? "una startup";
+    if (item.type === "follow") return `${who} comenzó a seguir a ${startupName}`;
+    if (item.type === "interest") return `${who} quiere conocer a ${startupName}`;
+    if (item.type === "match") return `Match mutuo: ${startupName} aceptó tu interés`;
+    if (item.type === "round_opened") return `${startupName} abrió una ronda de financiamiento`;
+    return "Tienes una notificación nueva";
+  }
+
+  function renderBadge() {
+    const badge = $("#notif-badge");
+    badge.hidden = !notifications.unread;
+    badge.textContent = notifications.unread > 99 ? "99+" : String(notifications.unread);
+    $("#notification-button").setAttribute("aria-label", notifications.unread ? `Notificaciones, ${notifications.unread} sin leer` : "Notificaciones");
+  }
+
+  async function loadNotifications() {
+    const { data, error } = await supabaseClient.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30);
+    if (error) throw error;
+    notifications.items = data || [];
+    notifications.items.forEach((item) => notifications.seen.add(item.id));
+    notifications.unread = notifications.items.filter((item) => !item.read_at).length; // cuenta sobre las últimas 30
+    renderBadge();
+  }
+
+  async function renderNotificationPanel() {
+    const panel = $("#notification-panel");
+    if (!notifications.items.length) {
+      panel.innerHTML = '<p class="search-empty">Aún no tienes notificaciones.</p>';
+      return;
+    }
+    const context = await notificationContext(notifications.items);
+    panel.innerHTML = `<h3>Notificaciones</h3>${notifications.items.map((item) => `<button class="notice-row${item.read_at ? "" : " unread"}" data-notice-open="${item.id}"><span>${escapeHtml(describeNotification(item, context))}</span><small>${new Date(item.created_at).toLocaleString("es-CL")}</small></button>`).join("")}`;
+  }
+
+  async function markNotificationsRead() {
+    const stamp = new Date().toISOString();
+    const { error } = await supabaseClient.from("notifications").update({ read_at: stamp }).eq("user_id", user.id).is("read_at", null);
+    if (error) return reportFailure("No pudimos marcar las notificaciones como leídas", error);
+    notifications.items.forEach((item) => { item.read_at ??= stamp; });
+    notifications.unread = 0;
+    renderBadge();
+  }
+
+  async function toggleNotificationPanel(event) {
+    event?.stopPropagation();
+    const panel = $("#notification-panel");
+    panel.hidden = !panel.hidden;
+    $("#notification-button").setAttribute("aria-expanded", String(!panel.hidden));
+    if (panel.hidden) return;
+    try {
+      await renderNotificationPanel();
+    } catch (error) {
+      return reportFailure("No pudimos cargar tus notificaciones", error);
+    }
+    if (notifications.unread) await markNotificationsRead(); // el panel conserva el resaltado de lo nuevo hasta que se cierre
+  }
+
+  async function showNoticePopup(item) {
+    let context = { actors: new Map(), entities: new Map() };
+    try {
+      context = await notificationContext([item]);
+    } catch (error) {
+      console.error("No pudimos completar el aviso:", error);
+    }
+    const actor = context.actors.get(item.actor_id);
+    const card = document.createElement("div");
+    card.className = "notice-card";
+    card.setAttribute("role", "status");
+    card.innerHTML = `<span class="avatar notice-avatar" data-bg="${escapeHtml(actor?.avatar_url || "")}">${actor?.avatar_url ? "" : escapeHtml(initialsOf(actor?.full_name || "V"))}</span><div class="notice-copy"><p>${escapeHtml(describeNotification(item, context))}</p><button class="text-button" data-notice-open="${item.id}">Ver perfil</button></div><button class="notice-close" aria-label="Cerrar aviso">×</button>`;
+    paintDataBg(card);
+    const stack = $("#notice-stack");
+    stack.append(card);
+    while (stack.children.length > 3) stack.firstElementChild.remove(); // máximo 3 apilados
+    window.setTimeout(() => card.remove(), 6000);
+  }
+
+  function receiveNotification(item) {
+    if (!item || notifications.seen.has(item.id)) return;
+    notifications.seen.add(item.id);
+    notifications.items.unshift(item);
+    if (!item.read_at) notifications.unread++;
+    renderBadge();
+    if (!$("#notification-panel").hidden) renderNotificationPanel().catch(() => {});
+    showNoticePopup(item);
+  }
+
+  async function pollNotifications() {
+    const { data, error } = await supabaseClient.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30);
+    if (error) return console.error("No pudimos consultar las notificaciones:", error);
+    [...(data || [])].reverse().forEach(receiveNotification);
+  }
+
+  function startPolling() {
+    if (!notifications.pollTimer) notifications.pollTimer = window.setInterval(pollNotifications, config.notificationPollMs || 60000);
+  }
+
+  function stopPolling() {
+    window.clearInterval(notifications.pollTimer);
+    notifications.pollTimer = null;
+  }
+
+  function stopNotifications() {
+    stopPolling();
+    window.clearTimeout(notifications.guardTimer);
+    if (notifications.channel) supabaseClient.removeChannel(notifications.channel);
+    Object.assign(notifications, { items: [], unread: 0, seen: new Set(), channel: null, subscribed: false });
+    $("#notice-stack").innerHTML = "";
+    $("#notification-panel").hidden = true;
+  }
+
+  function startNotifications(signal) {
+    stopNotifications();
+    signal.addEventListener("abort", stopNotifications);
+    loadNotifications().catch((error) => reportFailure("No pudimos cargar tus notificaciones", error));
+    notifications.channel = supabaseClient.channel(`notifications-${user.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` }, (payload) => receiveNotification(payload.new))
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          notifications.subscribed = true;
+          stopPolling();
+        } else if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
+          notifications.subscribed = false;
+          startPolling();
+        }
+      });
+    notifications.guardTimer = window.setTimeout(() => { if (!notifications.subscribed) startPolling(); }, 10000);
+  }
+
+  async function openNotificationTarget(item) {
+    if (["match", "round_opened"].includes(item.type)) return openProfile("startup", item.entity_id);
+    const { data: actor, error } = await supabaseClient.from("profiles").select("id, role").eq("id", item.actor_id).maybeSingle();
+    if (error || !actor) return notify("No pudimos abrir ese perfil.");
+    if (actor.role === "company") {
+      const { data: company } = await supabaseClient.from("company_profiles").select("id").eq("owner_id", actor.id).maybeSingle();
+      return company ? openProfile("company", company.id) : notify("Esa empresa aún no tiene perfil publicado.");
+    }
+    return openProfile("investor", actor.id);
+  }
+
+  function handleNoticeClick(event) {
+    if (event.target.closest(".notice-close")) return event.target.closest(".notice-card").remove();
+    const open = event.target.closest("[data-notice-open]");
+    if (!open) return;
+    const item = notifications.items.find((entry) => entry.id === open.dataset.noticeOpen);
+    $("#notification-panel").hidden = true;
+    $("#notification-button").setAttribute("aria-expanded", "false");
+    if (item) openNotificationTarget(item);
+  }
 
   async function signOut() {
     const { error } = await supabaseClient.auth.signOut();
@@ -1178,24 +1594,6 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     setModal($("#startup-profile-modal"), true);
   }
 
-  // Marca de "busco financiamiento" del formulario de perfil -> filas de funding_rounds (el trigger actualiza is_fundraising).
-  async function syncOpenRound(saved, wantsOpen, values) {
-    const { data: open, error } = await supabaseClient.from("funding_rounds").select("id").eq("startup_id", saved.id).eq("status", "open").maybeSingle();
-    if (error) throw error;
-    if (wantsOpen === Boolean(open)) return saved;
-    const write = wantsOpen
-      ? supabaseClient.from("funding_rounds").insert({
-        startup_id: saved.id, status: "open", stage: values.stage, target_usd: values.target_amount_usd,
-        ticket_min_usd: values.preferred_check_min_usd, ticket_max_usd: values.preferred_check_max_usd, opens_at: new Date().toISOString()
-      })
-      : supabaseClient.from("funding_rounds").update({ status: "paused", updated_at: new Date().toISOString() }).eq("id", open.id);
-    const { error: writeError } = await write;
-    if (writeError) throw writeError;
-    const { data: fresh, error: freshError } = await supabaseClient.from("startup_profiles").select("*").eq("id", saved.id).single();
-    if (freshError) throw freshError;
-    return fresh;
-  }
-
   async function saveStartupProfile(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1239,13 +1637,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       console.error("No pudimos guardar el perfil de startup:", error);
       return;
     }
-    try {
-      startupProfile = await syncOpenRound(data, form.elements.isFundraising.checked, values);
-    } catch (roundError) {
-      startupProfile = data;
-      setError($("#startup-profile-error"), `Perfil guardado, pero no pudimos actualizar la ronda: ${roundError.message}`);
-      return;
-    }
+    startupProfile = data;
     setModal($("#startup-profile-modal"), false);
     renderStartupDashboard();
     await loadStartups();
@@ -1256,14 +1648,19 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
     if (!startupProfile) return notify("Completa primero tu perfil de startup.");
     const input = $("#update-input");
     const content = input.value.trim();
+    const category = $("#post-category").value;
     if (!content) return notify("Escribe una actualización antes de publicarla.");
+    if (!category) return notify("Elige una categoría para tu publicación.");
     const { error } = await supabaseClient.from("posts").insert({
       startup_id: startupProfile.id,
       author_id: user.id,
-      content
+      content,
+      category
     });
     if (error) return reportFailure("No pudimos publicar la actualización", error);
     input.value = "";
+    $("#post-category").value = "";
+    loadOwnPosts().catch((failure) => reportFailure("No pudimos cargar tus publicaciones", failure));
     notify("Actualización publicada para la comunidad.");
     switchRemoteView("updates");
   }
@@ -1271,6 +1668,8 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
   async function handleRemoteClick(event) {
     const upload = event.target.closest("[data-upload]");
     if (upload) return openImageUploader(upload.dataset.upload);
+    const follow = event.target.closest("[data-follow]");
+    if (follow) return toggleFollow(follow.dataset.follow);
     const profileLink = event.target.closest("[data-open-profile]");
     if (profileLink) {
       const [kind, id] = profileLink.dataset.openProfile.split(":");
@@ -1357,7 +1756,7 @@ window.initializeSupabaseApp = function initializeSupabaseApp() {
       setModal($("#startup-profile-modal"), false);
     }
   });
-  [["close-profile-modal", "profile-modal"], ["close-image-modal", "image-modal"], ["close-pitch-modal", "pitch-modal"]].forEach(([button, modal]) => {
+  [["close-profile-modal", "profile-modal"], ["close-image-modal", "image-modal"], ["close-pitch-modal", "pitch-modal"], ["close-round-modal", "round-modal"]].forEach(([button, modal]) => {
     $(`#${button}`).addEventListener("click", () => setModal($(`#${modal}`), false));
     $(`#${modal}`).addEventListener("click", (event) => { if (event.target === $(`#${modal}`)) setModal($(`#${modal}`), false); });
   });
